@@ -77,7 +77,9 @@ No production analytics setting change is required for the code boundary. As def
 
 ## Dependency audit
 
-`npm audit --omit=dev` reports six dependency findings: one critical (Next.js), one high (follow-redirects), four moderate (fast-uri, nodemailer, next-auth and its adapter). This audit exits nonzero. These existing dependency advisories are separate from the browser telemetry patch; no dependency upgrade or audit fix was applied. Prioritize a compatibility-tested patch review for the critical/high findings. Review advisory applicability rather than claiming this telemetry change resolves them.
+The initial `npm audit --omit=dev` reported six dependency findings: one critical (Next.js), one high (follow-redirects), four moderate (fast-uri, nodemailer, next-auth and its adapter). This caused PR #5's CI audit step to fail after the application checks passed.
+
+The CI repair updates Next.js to 15.5.29, Nodemailer (including its existing override) to 10.1.4, follow-redirects to 1.16.3, and fast-uri to 3.1.9 in the lockfile. The production audit now reports zero vulnerabilities; its CI enforcement remains unchanged. This dependency repair does not establish actual GA4 collection acceptance or remove the separate provider-validation gate below.
 
 References: [Vercel redaction](https://vercel.com/docs/analytics/redacting-sensitive-data), [Google configuration](https://developers.google.com/analytics/devguides/collection/ga4/reference/config), installed SDK declarations/initialization code. Critical Next.js advisory: [GHSA-2464-fhr4-w9xw](https://github.com/advisories/GHSA-2464-fhr4-w9xw); follow-redirects: [GHSA-q3jh-wrc6-jgq8](https://github.com/advisories/GHSA-q3jh-wrc6-jgq8).
 

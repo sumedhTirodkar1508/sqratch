@@ -109,9 +109,8 @@ export async function POST(req: Request): Promise<NextResponse> {
       clientId: apiKey,
       clientSecret: apiSecret,
     });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[shopify/embedded/session] Token exchange failed:", message);
+  } catch {
+    console.error("[shopify/embedded/session]", { outcome: "exchange_failed" });
     console.log("[shopify/embedded/session]", { outcome: "exchange_failed" });
     return NextResponse.json(
       { error: "Could not complete Shopify authorization. Please try again." },

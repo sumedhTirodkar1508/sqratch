@@ -66,8 +66,8 @@ export async function GET(request: NextRequest) {
     url.searchParams.set("state", state);
 
     return NextResponse.redirect(url);
-  } catch (error) {
-    console.error("[shopify/oauth/start][GET] Error:", error);
+  } catch {
+    console.error("[shopify/oauth/start][GET]", { outcome: "oauth_start_failed" });
     return NextResponse.redirect(
       buildShopifyDashboardRedirect({
         origin: request.nextUrl.origin,

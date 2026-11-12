@@ -122,7 +122,9 @@ WHERE "id" = :reviewed_job_id
 
 | Variable | Classification | Read in | Notes |
 |---|---|---|---|
-| `NEXT_PUBLIC_GA_ID` | Optional | `src/app/layout.tsx`, `src/components/GoogleAnalytics.tsx` | Google Analytics measurement ID. Not a secret (it's client-visible by design), but use a placeholder in shared/template configuration rather than a production-specific ID. |
+| `GA4_MEASUREMENT_ID` | Optional, server-only | `src/app/api/analytics/google/route.ts` | Dedicated GA4 web stream ID (`G-…`). All three GA4 variables are required to forward events. Legacy `NEXT_PUBLIC_GA_ID` is unused. |
+| `GA4_API_SECRET` | Secret, server-only | Same route | Measurement Protocol secret for that stream; never expose through NEXT_PUBLIC_, logs or client bundles. |
+| `GA4_SITE_ORIGIN` | Optional, server-only | Same route | Exact canonical site origin, e.g. `https://www.sqratch.com`, without a path/query. Browser input never determines the forwarded host. |
 
 ## Seed script (local/dev only)
 

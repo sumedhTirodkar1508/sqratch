@@ -189,7 +189,7 @@ export async function installationsPostImpl(
       if (currencyResult.ok) {
         shopifyCurrencyCode = currencyResult.currencyCode;
       } else {
-        console.warn("[shopify/installations/[installId]] Failed to query currency:", currencyResult.error);
+        console.warn("[shopify/installations/[installId]]", { outcome: "currency_lookup_failed" });
       }
     } catch {
       console.error("[shopify/installations/[installId]] Error querying currency", {

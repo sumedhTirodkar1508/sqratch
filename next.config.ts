@@ -47,10 +47,8 @@ const nextConfig: NextConfig = {
   },
   async headers() {
     // PHASE 16B — route-scoped ONLY, applied to exactly these two paths.
-    // SQRATCH sets no global X-Frame-Options, CSP, Referrer-Policy, or
-    // Cache-Control today, so every header below is purely a TIGHTENING of
-    // these two new routes, never a relaxation of anything existing, and no
-    // other path's response headers are affected.
+    // Frame and cache restrictions below remain scoped to Commerce7.
+    // The global no-referrer policy also protects auth redirects and assets.
     const noReferrerNoStore = [
       // Both pages carry query-string credentials (a Commerce7 account JWT on
       // /connect, a short-lived one-time link token on /link) that must never
@@ -62,6 +60,7 @@ const nextConfig: NextConfig = {
     ];
 
     return [
+      { source: "/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
       {
         // Permits the Commerce7 Admin App Extension iframe to embed this page
         // from Commerce7's admin origins and denies every other embedder —

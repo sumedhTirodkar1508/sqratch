@@ -126,12 +126,12 @@ export async function POST(request: NextRequest) {
       connectionId: result.connectionId,
     });
     settingsSynced = syncResult.ok;
-  } catch (settingsError) {
+  } catch {
     console.error(
       JSON.stringify({
         event: "commerce7_link_settings_sync_failed",
         tenantId: intent.externalAccountId,
-        message: settingsError instanceof Error ? settingsError.message : "unknown error",
+        outcome: "settings_sync_failed",
       }),
     );
   }

@@ -77,11 +77,11 @@ describe("4. route-scoped response headers", () => {
   const headersBlock = nextConfig.match(/async headers\(\)[\s\S]*?\n  \},/)?.[0] ?? "";
   assert.ok(headersBlock.length > 0, "headers() function not found in next.config.ts");
 
-  test("headers() is scoped to exactly /commerce7/connect and /commerce7/link", () => {
+  test("headers() retains both Commerce7 rules and the reviewed global referrer restriction", () => {
     const sources = [...headersBlock.matchAll(/source:\s*"([^"]+)"/g)].map((m) => m[1]);
     assert.deepEqual(
       sources.sort(),
-      ["/commerce7/connect", "/commerce7/link"].sort(),
+      ["/:path*", "/commerce7/connect", "/commerce7/link"].sort(),
       "no other route may be added to this headers() list without deliberate review",
     );
   });
@@ -105,10 +105,13 @@ describe("4. route-scoped response headers", () => {
     assert.match(constBlock, /key:\s*"Cache-Control",\s*value:\s*"no-store"/);
   });
 
-  test("no wildcard frame-ancestors and no global (source: '/(.*)'-style) header rule was introduced", () => {
+  test("no wildcard frame-ancestors; global rule contains only no-referrer", () => {
     assert.doesNotMatch(nextConfig, /frame-ancestors\s+\*/);
     assert.doesNotMatch(nextConfig, /source:\s*["']\/\(\.\*\)["']/);
-    assert.doesNotMatch(nextConfig, /source:\s*["']\/:path\*["']/);
+    const globalRule = headersBlock.match(/\{ source: "\/:path\*", headers: \[([^\]]+)\] \}/)?.[1];
+    assert.ok(globalRule);
+    assert.match(globalRule, /"Referrer-Policy", value: "no-referrer"/);
+    assert.doesNotMatch(globalRule, /Content-Security-Policy|X-Frame-Options|Cache-Control/);
   });
 });
 

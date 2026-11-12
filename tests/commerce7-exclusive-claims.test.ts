@@ -1,6 +1,6 @@
 import "./env-setup";
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import { readFileSync } from "node:fs";
 import * as domain from "../src/lib/commerce7-reward-domain";
 import { Commerce7RewardsClient, customerTagCount } from "../src/lib/commerce/providers/commerce7-rewards-client";
@@ -45,7 +45,13 @@ function exclusiveApp(options: Options = {}) {
 }
 const grants = (app: Harness) => app.calls.filter((call) => call.method === "POST" && call.path === "/v1/tag-x-object/customer");
 const writes = (app: Harness) => app.calls.filter((call) => call.method !== "GET").map((call) => `${call.method} ${call.path}`);
-const view = (row: Row) => domain.serializeCommerce7Claim(row as never);
+const view = (row: Row) => {
+  // The saga harness starts on this date; DTO tests must use its clock rather
+  // than start expiring fixed October fixtures when the wall clock advances.
+  mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-10T00:00:00.000Z") });
+  try { return domain.serializeCommerce7Claim(row as never); }
+  finally { mock.timers.reset(); }
+};
 /** Objects built inside the VM-run saga have another realm's prototype; compare their JSON. */
 const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
 /** What the Brand "Check provider result" action does: clear the review flag (never the attempt markers) and provision. */

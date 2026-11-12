@@ -1,31 +1,14 @@
 "use client";
-
-import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect } from "react";
-
-declare global {
-  interface Window {
-    gtag?: (...args: unknown[]) => void;
-  }
-}
+import { useEffect } from 'react';
+import { usePathname } from 'next/navigation';
+import { googleRouteKey } from '@/lib/analytics-policy';
+import { gaEvent, resetGooglePage } from '@/lib/googleAnalytics';
 
 export default function GoogleAnalytics() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const GA_ID = process.env.NEXT_PUBLIC_GA_ID;
-
   useEffect(() => {
-    if (!GA_ID || !window.gtag) return;
-
-    const qs = searchParams.toString();
-    const page_path = qs ? `${pathname}?${qs}` : pathname;
-
-    window.gtag("event", "page_view", {
-      page_path,
-      page_location: window.location.href,
-      page_title: document.title,
-    });
-  }, [pathname, searchParams, GA_ID]);
-
+    if (!pathname || !googleRouteKey(window.location.href)) { resetGooglePage(); return; }
+    gaEvent('page_view');
+  }, [pathname]);
   return null;
 }

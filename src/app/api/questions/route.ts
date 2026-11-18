@@ -2,16 +2,7 @@ import { publicDisplayName } from "@/lib/display-name";
 import { NextRequest, NextResponse } from "next/server";
 import { getExperienceAccessContext, getViewerContext } from "@/lib/experience-access";
 import prisma from "@/lib/prisma";
-
-function getServerDayRange() {
-  const dayStart = new Date();
-  dayStart.setHours(0, 0, 0, 0);
-
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
-
-  return { dayStart, dayEnd };
-}
+import { submitQuestionWithinLimit, utcDayRange } from "@/lib/qa-capacity";
 
 async function getExperienceSlugFromRequest(request: NextRequest) {
   const experienceSlug = request.nextUrl.searchParams.get("experienceSlug");
@@ -232,7 +223,7 @@ export async function questionsGetImpl(
       );
     }
 
-    const { dayStart, dayEnd } = getServerDayRange();
+    const { dayStart, dayEnd } = utcDayRange();
     const [questions, todaysQuestionCount] = await Promise.all([
       prisma.question.findMany({
         where: {
@@ -376,20 +367,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { dayStart, dayEnd } = getServerDayRange();
     const dailyLimit = access.experience.qaDailyQuestionLimit || 1;
-    const todaysQuestionCount = await prisma.question.count({
-      where: {
-        experienceId: access.experience.id,
-        askedById: viewer.userId,
-        createdAt: {
-          gte: dayStart,
-          lt: dayEnd,
-        },
-      },
+    const result = await submitQuestionWithinLimit(prisma, {
+      experienceId: access.experience.id,
+      userId: viewer.userId,
+      body: content,
+      dailyLimit,
     });
 
-    if (todaysQuestionCount >= dailyLimit) {
+    if (!result.ok) {
+      if (result.reason === "BUSY") {
+        return NextResponse.json(
+          { error: "Too many simultaneous submissions. Please try again." },
+          { status: 503 },
+        );
+      }
       return NextResponse.json(
         {
           error: `Daily question limit reached (${dailyLimit}).`,
@@ -399,27 +391,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const question = await prisma.question.create({
-      data: {
-        experienceId: access.experience.id,
-        askedById: viewer.userId,
-        body: content,
-      },
-      select: {
-        id: true,
-        body: true,
-        status: true,
-        createdAt: true,
-      },
-    });
-
     return NextResponse.json(
-      {
-        data: {
-          ...question,
-          remainingToday: Math.max(0, dailyLimit - todaysQuestionCount - 1),
-        },
-      },
+      { data: { ...result.question, remainingToday: result.remainingToday } },
       { status: 201 },
     );
   } catch (error) {

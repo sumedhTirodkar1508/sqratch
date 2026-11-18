@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import bcryptjs from "bcryptjs";
-import { rateLimit, getRequestIp, rateLimitResponse } from "@/lib/rate-limit";
+import { getRequestIp, rateLimitResponse } from "@/lib/rate-limit";
+import { sharedRateLimit } from "@/lib/rate-limit-shared";
 import { issueEmailVerificationChallenge } from "@/lib/auth/email-verification";
 import { PASSWORD_POLICY_MESSAGE, validatePassword } from "@/lib/password-policy";
 import { withAuthNoStore } from "@/lib/auth/auth-response";
@@ -15,7 +16,7 @@ function optionalString(value: unknown) {
 async function handlePost(request: NextRequest) {
   try {
     const ip = getRequestIp(request);
-    const rl = rateLimit(`signup:${ip}`, 5, 15 * 60 * 1000);
+    const rl = await sharedRateLimit(`signup:${ip}`, 5, 15 * 60 * 1000);
     if (!rl.success) {
       return rateLimitResponse(rl.resetAt);
     }

@@ -4,7 +4,8 @@ import prisma from "@/lib/prisma";
 import { withAuthNoStore } from "@/lib/auth/auth-response";
 import { issuePasswordResetToken } from "@/lib/auth/password-reset";
 import { normalizeEmail } from "@/lib/email-validation";
-import { getRequestIp, rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { getRequestIp, rateLimitResponse } from "@/lib/rate-limit";
+import { sharedRateLimit, type RateLimiter } from "@/lib/rate-limit-shared";
 
 const WINDOW_MS = 15 * 60 * 1000;
 const PER_IP_LIMIT = 5;
@@ -16,7 +17,7 @@ export const FORGOT_PASSWORD_MESSAGE =
 
 export type ForgotPasswordDeps = {
   db: typeof prisma;
-  rateLimit: typeof rateLimit;
+  rateLimit: RateLimiter;
   sendResetEmail: (input: { email: string; name: string | null; token: string }) => Promise<void>;
   /** Runs the account lookup and mail delivery after the response is sent. */
   runAfterResponse: (task: () => Promise<void>) => void;
@@ -26,7 +27,7 @@ export async function POST(request: NextRequest) {
   return withAuthNoStore(
     await forgotPasswordImpl(request, {
       db: prisma,
-      rateLimit,
+      rateLimit: sharedRateLimit,
       sendResetEmail: async (input) => {
         const { sendPasswordResetEmail } = await import("@/helpers/mailer");
         await sendPasswordResetEmail(input);
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest) {
 
 export async function forgotPasswordImpl(request: NextRequest, deps: ForgotPasswordDeps) {
   const ip = getRequestIp(request);
-  const ipLimit = deps.rateLimit(`forgot-password:ip:${ip}`, PER_IP_LIMIT, WINDOW_MS);
+  const ipLimit = await deps.rateLimit(`forgot-password:ip:${ip}`, PER_IP_LIMIT, WINDOW_MS);
   if (!ipLimit.success) return rateLimitResponse(ipLimit.resetAt);
 
   let body: { email?: unknown } | null = null;
@@ -53,7 +54,7 @@ export async function forgotPasswordImpl(request: NextRequest, deps: ForgotPassw
   }
 
   const emailKey = crypto.createHash("sha256").update(email).digest("hex");
-  const emailLimit = deps.rateLimit(`forgot-password:email:${emailKey}`, PER_EMAIL_LIMIT, WINDOW_MS);
+  const emailLimit = await deps.rateLimit(`forgot-password:email:${emailKey}`, PER_EMAIL_LIMIT, WINDOW_MS);
 
   // Over the per-address limit the answer stays the same; nothing is sent. The
   // work happens after the response, so timing does not depend on the account.

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { withAuthNoStore } from "@/lib/auth/auth-response";
 import { resetPasswordWithToken } from "@/lib/auth/password-reset";
-import { getRequestIp, rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { getRequestIp, rateLimitResponse } from "@/lib/rate-limit";
+import { sharedRateLimit, type RateLimiter } from "@/lib/rate-limit-shared";
 
 const WINDOW_MS = 15 * 60 * 1000;
 const PER_IP_LIMIT = 10;
@@ -13,16 +14,16 @@ export const RESET_LINK_INVALID_MESSAGE =
 
 export type ResetPasswordDeps = {
   db: typeof prisma;
-  rateLimit: typeof rateLimit;
+  rateLimit: RateLimiter;
   now?: () => Date;
 };
 
 export async function POST(request: NextRequest) {
-  return withAuthNoStore(await resetPasswordImpl(request, { db: prisma, rateLimit }));
+  return withAuthNoStore(await resetPasswordImpl(request, { db: prisma, rateLimit: sharedRateLimit }));
 }
 
 export async function resetPasswordImpl(request: NextRequest, deps: ResetPasswordDeps) {
-  const ipLimit = deps.rateLimit(`reset-password:ip:${getRequestIp(request)}`, PER_IP_LIMIT, WINDOW_MS);
+  const ipLimit = await deps.rateLimit(`reset-password:ip:${getRequestIp(request)}`, PER_IP_LIMIT, WINDOW_MS);
   if (!ipLimit.success) return rateLimitResponse(ipLimit.resetAt);
 
   let body: { token?: unknown; password?: unknown; confirmPassword?: unknown } | null = null;

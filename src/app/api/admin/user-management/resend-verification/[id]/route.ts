@@ -4,7 +4,8 @@ import { getServerSession } from "next-auth/next";
 import prisma from "@/lib/prisma";
 import { authOptions } from "@/app/api/auth/[...nextauth]/options";
 import { issueEmailVerificationChallenge } from "@/lib/auth/email-verification";
-import { rateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { rateLimitResponse } from "@/lib/rate-limit";
+import { sharedRateLimit, type RateLimiter } from "@/lib/rate-limit-shared";
 
 const WINDOW_MS = 15 * 60 * 1000;
 const PER_TARGET_LIMIT = 3;
@@ -14,7 +15,7 @@ export type ResendVerificationDeps = {
   getSession: () => Promise<{ user?: { id?: string | null; role?: string | null } } | null>;
   db: typeof prisma;
   sendVerificationEmail: (email: string, code: string) => Promise<void>;
-  rateLimit: typeof rateLimit;
+  rateLimit: RateLimiter;
 };
 
 export async function POST(
@@ -28,7 +29,7 @@ export async function POST(
       const { sendVerificationEmail } = await import("@/helpers/mailer");
       await sendVerificationEmail(email, code);
     },
-    rateLimit,
+    rateLimit: sharedRateLimit,
   }));
 }
 
@@ -50,9 +51,9 @@ export async function resendVerificationImpl(
 
   const { id } = await params;
 
-  const perAdmin = deps.rateLimit(`admin-resend-verify-admin:${adminId}`, PER_ADMIN_LIMIT, WINDOW_MS);
+  const perAdmin = await deps.rateLimit(`admin-resend-verify-admin:${adminId}`, PER_ADMIN_LIMIT, WINDOW_MS);
   if (!perAdmin.success) return rateLimitResponse(perAdmin.resetAt);
-  const perTarget = deps.rateLimit(`admin-resend-verify:${id}`, PER_TARGET_LIMIT, WINDOW_MS);
+  const perTarget = await deps.rateLimit(`admin-resend-verify:${id}`, PER_TARGET_LIMIT, WINDOW_MS);
   if (!perTarget.success) return rateLimitResponse(perTarget.resetAt);
 
   try {

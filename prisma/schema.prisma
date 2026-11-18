@@ -1840,3 +1840,13 @@ model StagedAsset {
   @@index([lessonId])
 }
 
+/// Deployment-wide rate-limit counters, used only when RATE_LIMIT_STORE=postgres.
+/// One row per key (hashed identifiers, never raw emails). Rows are replaced when
+/// their window expires and pruned opportunistically.
+model RateLimitCounter {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
+}

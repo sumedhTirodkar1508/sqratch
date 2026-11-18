@@ -6,6 +6,7 @@ const userSelect = {
   createdAt: true, isActive: true,
   creatorProfile: { select: { id: true } },
   brandMembers: { select: { id: true, role: true, brand: { select: { id: true, name: true, slug: true } } }, take: 3, orderBy: { createdAt: "asc" as const } },
+  _count: { select: { brandMembers: true } },
 } satisfies Prisma.UserSelect;
 
 async function serializable<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {

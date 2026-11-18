@@ -56,6 +56,7 @@ export async function PATCH(
         createdAt: updated.createdAt,
         isActive: updated.isActive,
         hasCreatorProfile: Boolean(updated.creatorProfile),
+        brandMembershipCount: updated._count.brandMembers,
         brands: updated.brandMembers.map((member) => ({
           id: member.brand.id,
           name: member.brand.name,

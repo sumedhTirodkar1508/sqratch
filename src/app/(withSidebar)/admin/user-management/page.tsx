@@ -47,6 +47,7 @@ type UserRecord = {
   isActive: boolean;
   isEmailVerified?: boolean;
   hasCreatorProfile: boolean;
+  brandMembershipCount?: number;
   brands: Array<{
     id: string;
     name: string;
@@ -97,31 +98,74 @@ function formatDateTime(value: string) {
 }
 
 function MembershipBadges({ user }: { user: UserRecord }) {
+  const [fullBrands, setFullBrands] = useState<UserRecord["brands"] | null>(
+    null,
+  );
+  const [expanding, setExpanding] = useState(false);
+  const [expandError, setExpandError] = useState<string | null>(null);
+
+  const total = user.brandMembershipCount ?? user.brands.length;
+  const shownBrands = fullBrands ?? user.brands;
+  const canExpand = fullBrands === null && total > user.brands.length;
+
+  async function expand() {
+    setExpanding(true);
+    setExpandError(null);
+    try {
+      const result = await fetchJson<{ brands: UserRecord["brands"] }>(
+        `/api/admin/users/${encodeURIComponent(user.id)}/memberships`,
+      );
+      setFullBrands(result.brands);
+    } catch (loadError) {
+      setExpandError(getErrorMessage(loadError, "Failed to load memberships."));
+    } finally {
+      setExpanding(false);
+    }
+  }
+
   const memberships = useMemo(() => {
     const items: string[] = [];
     if (user.hasCreatorProfile) {
       items.push("Creator");
     }
-    user.brands.forEach((brand) => {
+    shownBrands.forEach((brand) => {
       items.push(`${brand.name} (${brand.membershipRole})`);
     });
     return items;
-  }, [user]);
+  }, [user.hasCreatorProfile, shownBrands]);
 
   if (memberships.length === 0) {
     return <span className="text-sm text-copy-35">None</span>;
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
-      {memberships.map((label) => (
-        <span
-          key={label}
-          className="rounded-full border border-edge/10 bg-white/[0.03] px-3 py-1 text-xs text-copy-75"
-        >
-          {label}
-        </span>
-      ))}
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {total > 0 && (
+          <span className="text-xs text-copy-55">Brands: {total}</span>
+        )}
+        {memberships.map((label, index) => (
+          <span
+            key={`${label}-${index}`}
+            className="rounded-full border border-edge/10 bg-white/[0.03] px-3 py-1 text-xs text-copy-75"
+          >
+            {label}
+          </span>
+        ))}
+        {canExpand && (
+          <button
+            type="button"
+            className="text-xs underline text-copy-65"
+            disabled={expanding}
+            onClick={() => void expand()}
+          >
+            {expanding ? "Loading..." : `Show all ${total}`}
+          </button>
+        )}
+      </div>
+      {expandError && (
+        <p className="text-xs text-red-700 dark:text-red-300">{expandError}</p>
+      )}
     </div>
   );
 }

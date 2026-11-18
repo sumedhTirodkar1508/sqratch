@@ -332,6 +332,9 @@ model LessonProgress {
   userId              String?
   lessonId            String
   isCompleted         Boolean      @default(false)
+  /// Set once, in the write that first turns `isCompleted` true; never updated by
+  /// later saves. Null on rows completed before this column existed (not backfilled).
+  completedAt         DateTime?
   lastPositionSeconds Int          @default(0)
   updatedAt           DateTime     @updatedAt
   createdAt           DateTime     @default(now())

@@ -29,6 +29,7 @@ import type {
   CommerceProvider,
   Prisma,
 } from "@prisma/client";
+import type { OrderDateBasis } from "./order-date-basis";
 
 export type CommerceOrderListCursor = { createdAt: string; id: string };
 
@@ -293,30 +294,27 @@ export function parseOrderDateRange(
 }
 
 /**
- * Filters on the BUSINESS ORDER DATE — the same value
- * `resolveDisplayOrderDate` renders — rather than on SQRATCH's own
- * `createdAt` ingestion timestamp.
+ * Filters orders by date. `basis` is the same choice the conversion report
+ * offers (see `./order-date-basis.ts`), and the two predicates match exactly:
  *
- * WHY THE `OR`. The displayed order date is `providerCreatedAt ?? createdAt`,
- * which is not a single column. Filtering only on `createdAt` would be
- * plainly wrong for backfilled history (an order PLACED in June but
- * INGESTED in August would vanish from a June filter); filtering only on
- * `providerCreatedAt` would silently drop every row where the provider
- * reported no timestamp. So the predicate matches the fallback exactly:
+ * `provider` (default) filters on the BUSINESS ORDER DATE, the value
+ * `resolveDisplayOrderDate` renders, rather than on SQRATCH's `createdAt`.
  *   - rows WITH a provider timestamp are compared on it, and
  *   - rows WITHOUT one fall back to `createdAt`,
- * which is precisely what the operator sees in the Date column.
- *
- * A Prisma comparison on a NULL column never matches, so the first branch
- * inherently excludes null-`providerCreatedAt` rows and the two branches
- * cannot double-count.
- *
- * The first branch is served by the existing `@@index([brandId,
+ * so an order PLACED in June but INGESTED in August still appears in a June
+ * filter, and no row with a missing provider timestamp silently drops out. A
+ * Prisma comparison on a NULL column never matches, so the two branches cannot
+ * double-count. The first branch is served by `@@index([brandId,
  * providerCreatedAt])`.
+ *
+ * `ingested` filters on `createdAt` only: the time SQRATCH received the order.
+ *
+ * Either way the list still pages by `createdAt` (see CURSOR FIELD CHOICE).
  */
 export function buildOrderDateWhere(
   from: Date | null,
   to: Date | null,
+  basis: OrderDateBasis = "provider",
 ): Prisma.CommerceOrderWhereInput {
   if (!from && !to) {
     return {};
@@ -325,6 +323,9 @@ export function buildOrderDateWhere(
     ...(from ? { gte: from } : {}),
     ...(to ? { lte: to } : {}),
   };
+  if (basis === "ingested") {
+    return { createdAt: range };
+  }
   return {
     OR: [
       { providerCreatedAt: range },

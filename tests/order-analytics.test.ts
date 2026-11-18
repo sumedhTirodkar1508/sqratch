@@ -29,9 +29,9 @@ test("conversion analytics excludes unattributed orders from conversion values a
   assert.equal(result.totalIngestedOrders, 2);
   assert.equal(result.attributedOrders, 1);
   assert.equal(result.currentlyNetPositivePaidOrders, 1);
-  assert.deepEqual(result.grossAttributedRevenueByCurrency, [{ currencyCode: "USD", minor: "1000" }]);
-  assert.deepEqual(result.refundedRevenueByCurrency, [{ currencyCode: "USD", minor: "250" }]);
-  assert.deepEqual(result.netAttributedRevenueByCurrency, [{ currencyCode: "USD", minor: "750" }]);
+  assert.deepEqual(result.attributedOrderValueByCurrency, [{ currencyCode: "USD", minor: "1000" }]);
+  assert.deepEqual(result.refundedAttributedValueByCurrency, [{ currencyCode: "USD", minor: "250" }]);
+  assert.deepEqual(result.currentNetAttributedOrderValueByCurrency, [{ currencyCode: "USD", minor: "750" }]);
   assert.deepEqual(result.attributedOrdersByProvider, [{ id: "SHOPIFY", orders: 1 }]);
   assert.deepEqual(result.attributedOrdersByLesson, [{ id: "lesson-a", orders: 1 }]);
 });
@@ -57,7 +57,7 @@ test("a Commerce7 order WITH attribution counts as a conversion identically to S
   ]);
   assert.equal(result.attributedOrders, 1);
   assert.equal(result.currentlyNetPositivePaidOrders, 1);
-  assert.deepEqual(result.grossAttributedRevenueByCurrency, [{ currencyCode: "USD", minor: "4000" }]);
+  assert.deepEqual(result.attributedOrderValueByCurrency, [{ currencyCode: "USD", minor: "4000" }]);
   assert.deepEqual(result.attributedOrdersByProvider, [{ id: "COMMERCE7", orders: 1 }]);
   assert.deepEqual(result.attributedOrdersByCreator, [{ id: "creator-c7", orders: 1 }]);
 });
@@ -79,7 +79,7 @@ test("a REFUNDED (via tender-derived financial status) Commerce7 order reflects 
   assert.equal(result.attributedOrders, 1);
   assert.equal(result.currentlyNetPositivePaidOrders, 0);
   assert.equal(result.fullyRefundedOrders, 1);
-  assert.deepEqual(result.netAttributedRevenueByCurrency, []);
+  assert.deepEqual(result.currentNetAttributedOrderValueByCurrency, []);
 });
 
 test("conversion analytics separates historical attribution from current financial state", () => {
@@ -105,9 +105,9 @@ test("conversion analytics separates historical attribution from current financi
   assert.equal(result.pendingOrAuthorizedOrders, 2);
   assert.equal(result.partiallyRefundedOrders, 1);
   assert.equal(result.fullyRefundedOrders, 1);
-  assert.deepEqual(result.grossAttributedRevenueByCurrency, [{ currencyCode: "USD", minor: "7000" }]);
-  assert.deepEqual(result.refundedRevenueByCurrency, [{ currencyCode: "USD", minor: "1400" }]);
-  assert.deepEqual(result.netAttributedRevenueByCurrency, [{ currencyCode: "USD", minor: "2100" }]);
+  assert.deepEqual(result.attributedOrderValueByCurrency, [{ currencyCode: "USD", minor: "7000" }]);
+  assert.deepEqual(result.refundedAttributedValueByCurrency, [{ currencyCode: "USD", minor: "1400" }]);
+  assert.deepEqual(result.currentNetAttributedOrderValueByCurrency, [{ currencyCode: "USD", minor: "2100" }]);
 });
 
 test("attributedOrdersByProduct counts each order once per distinct product regardless of repeated line items, falls back to the attribution product when no line items resolved, drops null product ids, and is not payment-gated", () => {
@@ -175,18 +175,18 @@ describe("currency-coded analytics never mix multiple currencies into one total"
     // Two currencies present -> two rows, ascending by code. NEVER a single
     // BigInt sum of 132257 + 95300 = 227557, which would be denominated in
     // nothing (neither CAD nor USD).
-    assert.deepEqual(result.grossAttributedRevenueByCurrency, [
+    assert.deepEqual(result.attributedOrderValueByCurrency, [
       { currencyCode: "CAD", minor: "132257" },
       { currencyCode: "USD", minor: "95300" },
     ]);
-    assert.deepEqual(result.netAttributedRevenueByCurrency, [
+    assert.deepEqual(result.currentNetAttributedOrderValueByCurrency, [
       { currencyCode: "CAD", minor: "132257" },
       { currencyCode: "USD", minor: "95300" },
     ]);
     // No entry anywhere sums to 227557 — the two totals are never combined.
     const allMinorValues = [
-      ...result.grossAttributedRevenueByCurrency.map((r) => r.minor),
-      ...result.netAttributedRevenueByCurrency.map((r) => r.minor),
+      ...result.attributedOrderValueByCurrency.map((r) => r.minor),
+      ...result.currentNetAttributedOrderValueByCurrency.map((r) => r.minor),
     ];
     assert.ok(!allMinorValues.includes("227557"), "the two currencies must never be summed together");
   });
@@ -199,11 +199,11 @@ describe("currency-coded analytics never mix multiple currencies into one total"
         lineItems: [],
       },
     ]);
-    assert.deepEqual(result.grossAttributedRevenueByCurrency, [{ currencyCode: "CAD", minor: "132257" }]);
-    assert.deepEqual(result.refundedRevenueByCurrency, [{ currencyCode: "CAD", minor: "132257" }]);
+    assert.deepEqual(result.attributedOrderValueByCurrency, [{ currencyCode: "CAD", minor: "132257" }]);
+    assert.deepEqual(result.refundedAttributedValueByCurrency, [{ currencyCode: "CAD", minor: "132257" }]);
     // A fully-refunded order is not "currently net-positive" (net is zero),
     // so it contributes no row here — never a fabricated {CAD, 0} either.
-    assert.deepEqual(result.netAttributedRevenueByCurrency, []);
+    assert.deepEqual(result.currentNetAttributedOrderValueByCurrency, []);
     const serialized = JSON.stringify(result);
     assert.ok(!serialized.includes('"USD"'), "the presentment currency must never appear in this order's analytics");
     assert.ok(!serialized.includes("95300"), "the presentment-currency minor amount must never appear");
@@ -223,7 +223,7 @@ describe("currency-coded analytics never mix multiple currencies into one total"
       { ...base, totalMinor: BigInt(1000), netRevenueMinor: BigInt(1000) },
       { ...base, totalMinor: BigInt(2000), netRevenueMinor: BigInt(2000) },
     ]);
-    assert.deepEqual(result.grossAttributedRevenueByCurrency, [{ currencyCode: "CAD", minor: "3000" }]);
+    assert.deepEqual(result.attributedOrderValueByCurrency, [{ currencyCode: "CAD", minor: "3000" }]);
   });
 
   test("an order with an unresolvable currency (null) is bucketed as UNKNOWN, never coalesced into a real currency and never silently dropped", () => {
@@ -239,7 +239,7 @@ describe("currency-coded analytics never mix multiple currencies into one total"
         lineItems: [],
       },
     ]);
-    assert.deepEqual(result.grossAttributedRevenueByCurrency, [
+    assert.deepEqual(result.attributedOrderValueByCurrency, [
       { currencyCode: "CAD", minor: "1000" },
       { currencyCode: "UNKNOWN", minor: "500" },
     ]);
@@ -252,7 +252,7 @@ describe("currency-coded analytics never mix multiple currencies into one total"
       lineItems: [],
     });
     const result = buildConversionAnalytics([mk("EUR", 300), mk("CAD", 100), mk("USD", 200)]);
-    assert.deepEqual(result.grossAttributedRevenueByCurrency, [
+    assert.deepEqual(result.attributedOrderValueByCurrency, [
       { currencyCode: "CAD", minor: "100" },
       { currencyCode: "EUR", minor: "300" },
       { currencyCode: "USD", minor: "200" },
@@ -272,15 +272,15 @@ describe("currency-coded analytics never mix multiple currencies into one total"
         lineItems: [],
       },
     ]);
-    assert.deepEqual(result.grossAttributedRevenueByCurrency, [
+    assert.deepEqual(result.attributedOrderValueByCurrency, [
       { currencyCode: "CAD", minor: "1000" },
       { currencyCode: "USD", minor: "2000" },
     ]);
-    assert.deepEqual(result.refundedRevenueByCurrency, [
+    assert.deepEqual(result.refundedAttributedValueByCurrency, [
       { currencyCode: "CAD", minor: "300" },
       { currencyCode: "USD", minor: "400" },
     ]);
-    assert.deepEqual(result.netAttributedRevenueByCurrency, [
+    assert.deepEqual(result.currentNetAttributedOrderValueByCurrency, [
       { currencyCode: "CAD", minor: "700" },
       { currencyCode: "USD", minor: "1600" },
     ]);
@@ -303,9 +303,13 @@ describe("currency-coded analytics never mix multiple currencies into one total"
     ]) {
       assert.doesNotMatch(source, new RegExp(`\\b${staleField}\\b`), `stale currency-unsafe field must not reappear: ${staleField}`);
     }
-    assert.match(source, /grossAttributedRevenueByCurrency/);
-    assert.match(source, /refundedRevenueByCurrency/);
-    assert.match(source, /netAttributedRevenueByCurrency/);
+    assert.match(source, /attributedOrderValueByCurrency/);
+    assert.match(source, /refundedAttributedValueByCurrency/);
+    assert.match(source, /currentNetAttributedOrderValueByCurrency/);
+    // The deprecated aliases were removed from the response.
+    assert.doesNotMatch(source, /grossAttributedRevenueByCurrency/);
+    assert.doesNotMatch(source, /\brefundedRevenueByCurrency\b/);
+    assert.doesNotMatch(source, /netAttributedRevenueByCurrency/);
   });
 });
 

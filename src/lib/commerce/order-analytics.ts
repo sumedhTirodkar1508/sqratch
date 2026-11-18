@@ -160,12 +160,6 @@ export type ConversionDailyPoint = {
   refundedAttributedValueByCurrency: MinorByCurrencyRow[];
   /** Current net value of paid, partially paid and partially refunded orders only. Not a payment total. */
   currentNetAttributedOrderValueByCurrency: MinorByCurrencyRow[];
-  /** @deprecated Same values as `attributedOrderValueByCurrency`; kept for one release. */
-  grossRevenueByCurrency: MinorByCurrencyRow[];
-  /** @deprecated Same values as `refundedAttributedValueByCurrency`; kept for one release. */
-  refundedRevenueByCurrency: MinorByCurrencyRow[];
-  /** @deprecated Same values as `currentNetAttributedOrderValueByCurrency`; kept for one release. */
-  netRevenueByCurrency: MinorByCurrencyRow[];
 };
 
 export type ConversionTrendRange = { start: Date; end: Date };
@@ -240,9 +234,6 @@ export function buildConversionDailyTrend(
       attributedOrderValueByCurrency: orderValue,
       refundedAttributedValueByCurrency: refundedValue,
       currentNetAttributedOrderValueByCurrency: currentNetValue,
-      grossRevenueByCurrency: orderValue,
-      refundedRevenueByCurrency: refundedValue,
-      netRevenueByCurrency: currentNetValue,
     });
   }
 
@@ -333,12 +324,6 @@ export function buildConversionAnalytics(rows: ConversionAnalyticsOrder[]) {
     attributedOrderValueByCurrency: attributedOrderValue,
     refundedAttributedValueByCurrency: refundedAttributedValue,
     currentNetAttributedOrderValueByCurrency: currentNetAttributedOrderValue,
-    /** @deprecated Same values as `attributedOrderValueByCurrency`; kept for one release. */
-    grossAttributedRevenueByCurrency: attributedOrderValue,
-    /** @deprecated Same values as `refundedAttributedValueByCurrency`; kept for one release. */
-    refundedRevenueByCurrency: refundedAttributedValue,
-    /** @deprecated Same values as `currentNetAttributedOrderValueByCurrency`; kept for one release. */
-    netAttributedRevenueByCurrency: currentNetAttributedOrderValue,
     attributedOrdersByProvider: group(attributed.map((row) => row.provider)),
     attributedOrdersByEntryCampaign: group(attributed.map((row) => row.attribution.entryCampaignId)),
     attributedOrdersByProductCampaign: group(attributed.map((row) => row.attribution.productCampaignId)),

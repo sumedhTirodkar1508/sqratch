@@ -107,8 +107,8 @@ describe("Brand Analytics — attributed conversions & revenue panel", () => {
   });
 
   test("12. entry campaign and product campaign breakdowns are rendered as two separate sections, never combined into one number", () => {
-    assert.match(source, /By entry campaign/);
-    assert.match(source, /By product campaign/);
+    assert.match(source, /ENTRY_CAMPAIGN_BREAKDOWN_TITLE/);
+    assert.match(source, /PRODUCT_CAMPAIGN_BREAKDOWN_TITLE/);
     assert.match(source, /attributedOrdersByEntryCampaign/);
     assert.match(source, /attributedOrdersByProductCampaign/);
     // No arithmetic anywhere combines the two breakdown arrays/counts.
@@ -165,7 +165,7 @@ describe("Brand Analytics — attributed conversions & revenue panel", () => {
     const sectionStart = source.indexOf("function ConversionAnalyticsSection(");
     const sectionEnd = source.indexOf("\nfunction ConversionMetricCard(");
     const sectionBody = source.slice(sectionStart, sectionEnd);
-    assert.match(sectionBody, /href="\/dashboard\/brand\/commerce\/orders"/);
+    assert.match(sectionBody, /buildOrderExplorerHref\(\{ range: data\.range, dateBasis: data\.dateBasis \}\)/);
     // Scan EXECUTABLE code only: the section's own comment legitimately
     // explains that these controls are deliberately absent.
     const executableSection = executableSource(sectionBody);

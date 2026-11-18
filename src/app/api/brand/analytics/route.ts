@@ -5,6 +5,7 @@ import {
 } from "@/lib/brand-auth";
 import prisma from "@/lib/prisma";
 import { endOfUtcDay, parseUtcCalendarDate } from "@/lib/commerce/commerce-click-analytics";
+import { buildReportMeta } from "@/lib/report-meta";
 
 function getDateRange(request: NextRequest) {
   const dateFrom = request.nextUrl.searchParams.get("dateFrom");
@@ -21,8 +22,15 @@ function getDateRange(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  return brandAnalyticsGetImpl(request, getBrandAdminContext);
+}
+
+export async function brandAnalyticsGetImpl(
+  request: NextRequest,
+  getContext: typeof getBrandAdminContext,
+) {
   try {
-    const context = await getBrandAdminContext();
+    const context = await getContext();
 
     if (!context?.membership?.brand) {
       const failure = getBrandContextFailure(context);
@@ -175,6 +183,12 @@ export async function GET(request: NextRequest) {
           ),
         },
         byCampaign,
+        meta: buildReportMeta({
+          period: { start, end },
+          dateBasis: "event",
+          scope: campaignId ? "campaign" : "whole brand",
+          appliedFilters: campaignId ? { campaignId } : {},
+        }),
       },
     });
   } catch {

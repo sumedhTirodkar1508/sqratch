@@ -858,7 +858,10 @@ describe("PHASE B — deep-linked filters are seeded from the URL", () => {
   });
 
   test("the Analytics deep link uses the SAME parameter name the API and toolbar use", () => {
-    assert.match(analytics, /\/dashboard\/brand\/commerce\/orders\?attributed=attributed/);
+    // Built by the drilldown helper, which owns the `attributed` parameter name.
+    assert.match(analytics, /buildOrderExplorerHref\(\{[^}]*attributed: "attributed"/);
+    const drilldown = readFileSync(join(process.cwd(), "src/lib/commerce/order-drilldown.ts"), "utf8");
+    assert.match(drilldown, /params\.set\("attributed", scope\.attributed\)/);
     // The earlier, inert name must not come back.
     assert.doesNotMatch(analytics, /orders\?attribution=/);
   });

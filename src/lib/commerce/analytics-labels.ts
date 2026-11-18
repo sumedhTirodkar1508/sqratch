@@ -40,8 +40,21 @@ export function fallbackOrdersNote(count: number): string {
   return `${count} ${count === 1 ? "order used" : "orders used"} the date SQRATCH received ${count === 1 ? "it" : "them"} because the store did not supply an order date.`;
 }
 
+/** Shown wherever attributed orders or their value appear. Never call attributed value revenue, captured payments or commission. */
+export const ATTRIBUTION_NOTE =
+  "Attributed orders followed a tracked SQRATCH link. Attribution does not show that SQRATCH caused the sale and is not a commission statement.";
+
 export const CONVERSION_LIMITATIONS_NOTE =
-  "Attribution shows an order followed a tracked SQRATCH link. It does not show that SQRATCH caused the sale. SQRATCH does not record the amount actually paid, so these figures are order values, not collected payments.";
+  "SQRATCH does not record the amount actually paid, so these figures are order values, not collected payments.";
+
+/** The two campaign breakdowns answer different questions and are never added together. */
+export const ENTRY_CAMPAIGN_BREAKDOWN_TITLE = "By entry campaign (how the visitor arrived)";
+export const PRODUCT_CAMPAIGN_BREAKDOWN_TITLE = "By product campaign (which campaign promoted the product)";
+
+/** Each order counts once per distinct product it contains. */
+export const PRODUCT_BREAKDOWN_TITLE = "By product";
+export const PRODUCT_BREAKDOWN_NOTE =
+  "Orders containing this product. An order with several products is counted once for each, so rows do not add up to total orders.";
 
 export const FINANCIAL_STATUS_LABELS: Readonly<Record<string, string>> = {
   PENDING: "Pending",

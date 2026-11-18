@@ -96,7 +96,7 @@ describe("PHASE D — daily bucketing", () => {
       ["2026-08-01", "2026-08-02", "2026-08-03", "2026-08-04", "2026-08-05"],
     );
     assert.equal(trend[1].attributedOrders, 0, "Aug 2 must be present as an explicit zero");
-    assert.deepEqual(trend[1].grossRevenueByCurrency, []);
+    assert.deepEqual(trend[1].attributedOrderValueByCurrency, []);
   });
 
   test("every day in the range is emitted even with no orders at all", () => {
@@ -180,15 +180,15 @@ describe("PHASE D — daily bucketing", () => {
 describe("PHASE D — gross / refunded / net arithmetic", () => {
   test("a PAID order contributes gross and net, and a KNOWN-ZERO refund", () => {
     const trend = buildConversionDailyTrend([order()], RANGE, MAX_DAYS);
-    assert.deepEqual(trend[0].grossRevenueByCurrency, [{ currencyCode: "CAD", minor: "1000" }]);
+    assert.deepEqual(trend[0].attributedOrderValueByCurrency, [{ currencyCode: "CAD", minor: "1000" }]);
     // A real `0` row, NOT an empty array — and deliberately so. The order
     // genuinely reports a refunded amount of zero, which is different from
     // "this currency had no activity at all today" (which IS the empty
     // array, see the zero-fill test above). This matches the headline
-    // `refundedRevenueByCurrency` semantics exactly, because the trend
+    // `refundedAttributedValueByCurrency` semantics exactly, because the trend
     // reuses the very same currency-grouping function.
-    assert.deepEqual(trend[0].refundedRevenueByCurrency, [{ currencyCode: "CAD", minor: "0" }]);
-    assert.deepEqual(trend[0].netRevenueByCurrency, [{ currencyCode: "CAD", minor: "1000" }]);
+    assert.deepEqual(trend[0].refundedAttributedValueByCurrency, [{ currencyCode: "CAD", minor: "0" }]);
+    assert.deepEqual(trend[0].currentNetAttributedOrderValueByCurrency, [{ currencyCode: "CAD", minor: "1000" }]);
     assert.equal(trend[0].currentlyNetPositivePaidOrders, 1);
   });
 
@@ -200,9 +200,9 @@ describe("PHASE D — gross / refunded / net arithmetic", () => {
     );
     const emptyDay = trend[1];
     assert.equal(emptyDay.date, "2026-08-02");
-    assert.deepEqual(emptyDay.grossRevenueByCurrency, []);
-    assert.deepEqual(emptyDay.refundedRevenueByCurrency, []);
-    assert.deepEqual(emptyDay.netRevenueByCurrency, []);
+    assert.deepEqual(emptyDay.attributedOrderValueByCurrency, []);
+    assert.deepEqual(emptyDay.refundedAttributedValueByCurrency, []);
+    assert.deepEqual(emptyDay.currentNetAttributedOrderValueByCurrency, []);
   });
 
   test("the real #1002 PARTIALLY_REFUNDED shape: gross 9831, refunded 3277, net 6554, still net-positive", () => {
@@ -218,9 +218,9 @@ describe("PHASE D — gross / refunded / net arithmetic", () => {
       RANGE,
       MAX_DAYS,
     );
-    assert.deepEqual(trend[0].grossRevenueByCurrency, [{ currencyCode: "CAD", minor: "9831" }]);
-    assert.deepEqual(trend[0].refundedRevenueByCurrency, [{ currencyCode: "CAD", minor: "3277" }]);
-    assert.deepEqual(trend[0].netRevenueByCurrency, [{ currencyCode: "CAD", minor: "6554" }]);
+    assert.deepEqual(trend[0].attributedOrderValueByCurrency, [{ currencyCode: "CAD", minor: "9831" }]);
+    assert.deepEqual(trend[0].refundedAttributedValueByCurrency, [{ currencyCode: "CAD", minor: "3277" }]);
+    assert.deepEqual(trend[0].currentNetAttributedOrderValueByCurrency, [{ currencyCode: "CAD", minor: "6554" }]);
     assert.equal(trend[0].currentlyNetPositivePaidOrders, 1);
   });
 
@@ -237,9 +237,9 @@ describe("PHASE D — gross / refunded / net arithmetic", () => {
       RANGE,
       MAX_DAYS,
     );
-    assert.deepEqual(trend[0].grossRevenueByCurrency, [{ currencyCode: "CAD", minor: "9831" }]);
-    assert.deepEqual(trend[0].refundedRevenueByCurrency, [{ currencyCode: "CAD", minor: "9831" }]);
-    assert.deepEqual(trend[0].netRevenueByCurrency, [], "a fully refunded order is not currently net-positive");
+    assert.deepEqual(trend[0].attributedOrderValueByCurrency, [{ currencyCode: "CAD", minor: "9831" }]);
+    assert.deepEqual(trend[0].refundedAttributedValueByCurrency, [{ currencyCode: "CAD", minor: "9831" }]);
+    assert.deepEqual(trend[0].currentNetAttributedOrderValueByCurrency, [], "a fully refunded order is not currently net-positive");
     assert.equal(trend[0].currentlyNetPositivePaidOrders, 0);
     assert.equal(trend[0].attributedOrders, 1, "it is still an attributed order");
   });
@@ -253,7 +253,7 @@ describe("PHASE D — gross / refunded / net arithmetic", () => {
       );
       assert.equal(trend[0].attributedOrders, 1, status);
       assert.equal(trend[0].currentlyNetPositivePaidOrders, 0, status);
-      assert.deepEqual(trend[0].netRevenueByCurrency, [], status);
+      assert.deepEqual(trend[0].currentNetAttributedOrderValueByCurrency, [], status);
     }
   });
 
@@ -264,7 +264,7 @@ describe("PHASE D — gross / refunded / net arithmetic", () => {
       RANGE,
       MAX_DAYS,
     );
-    assert.deepEqual(trend[0].grossRevenueByCurrency, [{ currencyCode: "CAD", minor: "3500" }]);
+    assert.deepEqual(trend[0].attributedOrderValueByCurrency, [{ currencyCode: "CAD", minor: "3500" }]);
     assert.equal(trend[0].attributedOrders, 2);
   });
 });
@@ -283,7 +283,7 @@ describe("PHASE D — currencies are never combined", () => {
       RANGE,
       MAX_DAYS,
     );
-    assert.deepEqual(trend[0].grossRevenueByCurrency, [
+    assert.deepEqual(trend[0].attributedOrderValueByCurrency, [
       { currencyCode: "CAD", minor: "10000" },
       { currencyCode: "USD", minor: "20000" },
     ]);
@@ -300,16 +300,8 @@ describe("PHASE D — currencies are never combined", () => {
       "currentNetAttributedOrderValueByCurrency",
       "currentlyNetPositivePaidOrders",
       "date",
-      // Older names, same values, kept for one release (P36).
-      "grossRevenueByCurrency",
-      "netRevenueByCurrency",
       "refundedAttributedValueByCurrency",
-      "refundedRevenueByCurrency",
     ]);
-    // Old and new names carry numerically identical values.
-    assert.deepEqual(trend[0].grossRevenueByCurrency, trend[0].attributedOrderValueByCurrency);
-    assert.deepEqual(trend[0].refundedRevenueByCurrency, trend[0].refundedAttributedValueByCurrency);
-    assert.deepEqual(trend[0].netRevenueByCurrency, trend[0].currentNetAttributedOrderValueByCurrency);
     for (const forbidden of ["totalRevenue", "revenue", "grossRevenue", "combined"]) {
       assert.ok(!keys.includes(forbidden));
     }
@@ -324,7 +316,7 @@ describe("PHASE D — currencies are never combined", () => {
       RANGE,
       MAX_DAYS,
     );
-    assert.deepEqual(trend[0].grossRevenueByCurrency, [
+    assert.deepEqual(trend[0].attributedOrderValueByCurrency, [
       { currencyCode: "CAD", minor: "1000" },
       { currencyCode: "UNKNOWN", minor: "500" },
     ]);
@@ -358,8 +350,8 @@ describe("PHASE D — currencies are never combined", () => {
 
   test("minorForCurrency returns null for a currency absent that day — distinct from a real zero", () => {
     const trend = buildConversionDailyTrend([order({ currencyCode: "CAD" })], RANGE, MAX_DAYS);
-    assert.equal(minorForCurrency(trend[0].grossRevenueByCurrency, "CAD"), "1000");
-    assert.equal(minorForCurrency(trend[0].grossRevenueByCurrency, "USD"), null);
+    assert.equal(minorForCurrency(trend[0].attributedOrderValueByCurrency, "CAD"), "1000");
+    assert.equal(minorForCurrency(trend[0].attributedOrderValueByCurrency, "USD"), null);
   });
 });
 
@@ -375,8 +367,8 @@ describe("PHASE D — BigInt safety", () => {
       RANGE,
       MAX_DAYS,
     );
-    assert.equal(trend[0].grossRevenueByCurrency[0].minor, "9007199254740993");
-    assert.equal(typeof trend[0].grossRevenueByCurrency[0].minor, "string");
+    assert.equal(trend[0].attributedOrderValueByCurrency[0].minor, "9007199254740993");
+    assert.equal(typeof trend[0].attributedOrderValueByCurrency[0].minor, "string");
   });
 
   test("the trend builder never converts money through Number()", () => {
@@ -399,9 +391,9 @@ describe("PHASE D — runtime trend validation", () => {
       date: "2026-08-01",
       attributedOrders: 1,
       currentlyNetPositivePaidOrders: 1,
-      grossRevenueByCurrency: [{ currencyCode: "CAD", minor: "1000" }],
-      refundedRevenueByCurrency: [],
-      netRevenueByCurrency: [{ currencyCode: "CAD", minor: "1000" }],
+      attributedOrderValueByCurrency: [{ currencyCode: "CAD", minor: "1000" }],
+      refundedAttributedValueByCurrency: [],
+      currentNetAttributedOrderValueByCurrency: [{ currencyCode: "CAD", minor: "1000" }],
       ...overrides,
     };
   }
@@ -425,10 +417,10 @@ describe("PHASE D — runtime trend validation", () => {
   test("a malformed money row or count is rejected", () => {
     assert.equal(parseConversionDailyTrend([point({ attributedOrders: "one" })]), null);
     assert.equal(
-      parseConversionDailyTrend([point({ grossRevenueByCurrency: [{ currencyCode: "CAD", minor: 1000 }] })]),
+      parseConversionDailyTrend([point({ attributedOrderValueByCurrency: [{ currencyCode: "CAD", minor: 1000 }] })]),
       null,
     );
-    assert.equal(parseConversionDailyTrend([point({ netRevenueByCurrency: "nope" })]), null);
+    assert.equal(parseConversionDailyTrend([point({ currentNetAttributedOrderValueByCurrency: "nope" })]), null);
   });
 
   test("ONE malformed point rejects the whole trend", () => {
@@ -491,7 +483,9 @@ describe("PHASE D — dashboard wiring and boundaries", () => {
     // `attribution=`, which is NOT the parameter the orders API or the
     // explorer toolbar understands, so the link navigated but applied no
     // filter at all. It must use `attributed=`.
-    assert.match(brand, /\/dashboard\/brand\/commerce\/orders\?attributed=attributed/);
+    // The link is built by `buildOrderExplorerHref` so it also carries the
+    // report's period and date basis; the helper owns the `attributed` name.
+    assert.match(brand, /buildOrderExplorerHref\(\{[^}]*attributed: "attributed"/);
     assert.doesNotMatch(brand, /orders\?attribution=/);
     assert.match(brand, /View attributed orders/);
   });

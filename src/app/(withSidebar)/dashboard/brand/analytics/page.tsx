@@ -1,8 +1,9 @@
 "use client";
 
 import { DateBasisNotes, DateBasisSelect } from "@/components/commerce/date-basis-select";
-import type { OrderDateBasis } from "@/lib/commerce/order-date-basis";
-import { useEffect, useRef, useState } from "react";
+import { parseOrderDateBasis, type OrderDateBasis } from "@/lib/commerce/order-date-basis";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useUrlFilters } from "@/hooks/use-url-filters";
 import Link from "next/link";
 import { BrandPageShell } from "@/components/brand/page-shell";
 import { fetchJson, getErrorMessage } from "@/components/experience/client-utils";
@@ -26,6 +27,15 @@ import {
   TREND_COLUMN_LABELS,
 } from "@/lib/commerce/analytics-labels";
 import { FinancialStatusBreakdown } from "@/components/commerce/financial-status-breakdown";
+import { AttributionNote, ReportScopeCaption } from "@/components/commerce/report-scope-caption";
+import {
+  ENTRY_CAMPAIGN_BREAKDOWN_TITLE,
+  PRODUCT_BREAKDOWN_NOTE,
+  PRODUCT_BREAKDOWN_TITLE,
+  PRODUCT_CAMPAIGN_BREAKDOWN_TITLE,
+} from "@/lib/commerce/analytics-labels";
+import { buildOrderExplorerHref } from "@/lib/commerce/order-drilldown";
+import { parseReportMeta } from "@/lib/report-meta";
 
 import { defaultBrandAnalyticsDates, brandAnalyticsDateError } from "@/lib/commerce/brand-analytics-filters";
 
@@ -81,6 +91,8 @@ type CommerceProductCampaignRow =
 type CommerceRankedEntity = { id: string; name: string | null; clicks: number };
 
 type CommerceAnalyticsResponse = {
+  /** Validated with `parseReportMeta` before use. */
+  meta?: unknown;
   range: { start: string; end: string };
   limit: number;
   totals: {
@@ -115,6 +127,8 @@ const SURFACE_LABELS: Record<
 };
 
 type AnalyticsResponse = {
+  /** Validated with `parseReportMeta` before use. */
+  meta?: unknown;
   campaigns: Array<{
     id: string;
     name: string;
@@ -140,10 +154,13 @@ type AnalyticsResponse = {
 };
 
 export default function BrandAnalyticsPage() {
-  const [filters, setFilters] = useState(() => ({
-    campaignId: "",
-    ...defaultBrandAnalyticsDates(new Date()),
-  }));
+  // Filters live in the URL (dates, own campaign id, order-date basis only), so a
+  // refresh or shared link keeps the same view. Defaults are omitted from the URL.
+  const [defaults] = useState(() => ({ campaignId: "", ...defaultBrandAnalyticsDates(new Date()), dateBasis: "provider" as string }));
+  const [urlFilters, setUrlFilters] = useUrlFilters(defaults);
+  const { campaignId, dateFrom, dateTo } = urlFilters;
+  const filters = useMemo(() => ({ campaignId, dateFrom, dateTo }), [campaignId, dateFrom, dateTo]);
+  const setFilters = (update: (current: typeof filters) => typeof filters) => setUrlFilters(update(filters));
   const dateError = brandAnalyticsDateError(filters.dateFrom, filters.dateTo);
   const [campaigns, setCampaigns] = useState<AnalyticsResponse["campaigns"]>([]);
   const [data, setData] = useState<AnalyticsResponse | null>(null);
@@ -156,7 +173,8 @@ export default function BrandAnalyticsPage() {
   // here must never blank scans/unlocks/lesson data or click analytics, and
   // vice versa (see PART 19 of the task brief).
   const [conversion, setConversion] = useState<BrandConversionAnalytics | null>(null);
-  const [dateBasis, setDateBasis] = useState<OrderDateBasis>("provider");
+  const dateBasis: OrderDateBasis = parseOrderDateBasis(urlFilters.dateBasis) ?? "provider";
+  const setDateBasis = (basis: OrderDateBasis) => setUrlFilters({ dateBasis: basis });
   const [conversionError, setConversionError] = useState<string | null>(null);
   const [conversionLoading, setConversionLoading] = useState(true);
   // Guards against a slow, superseded request landing after a newer one when
@@ -319,6 +337,7 @@ export default function BrandAnalyticsPage() {
         <p id="campaign-filter-scope" className="mt-1 text-sm text-copy-65">
           Campaign filters engagement only. Product clicks and conversions cover the whole brand.
         </p>
+        <ReportScopeCaption meta={parseReportMeta(data?.meta)} />
         <label htmlFor="analytics-campaign" className="mt-3 grid max-w-md gap-2 text-sm">
           Campaign
           <select id="analytics-campaign" aria-describedby="campaign-filter-scope"
@@ -393,7 +412,7 @@ export default function BrandAnalyticsPage() {
         </>
       ) : null}
 
-      <CommerceClickSection data={commerce} error={commerceError} />
+      <CommerceClickSection data={commerce} error={commerceError} campaignFilterId={filters.campaignId} />
 
       <ConversionAnalyticsSection
         data={conversion}
@@ -401,6 +420,7 @@ export default function BrandAnalyticsPage() {
         loading={conversionLoading}
         dateBasis={dateBasis}
         onDateBasisChange={setDateBasis}
+        campaignFilterId={filters.campaignId}
       />
       </>}
     </BrandPageShell>
@@ -417,9 +437,11 @@ export default function BrandAnalyticsPage() {
 function CommerceClickSection({
   data,
   error,
+  campaignFilterId,
 }: {
   data: CommerceAnalyticsResponse | null;
   error: string | null;
+  campaignFilterId: string;
 }) {
   if (error) {
     return (
@@ -451,10 +473,9 @@ function CommerceClickSection({
       <PageCard>
         <h2 className="text-xl font-semibold">Product clicks</h2>
         <p className="mt-2 text-sm text-copy-65">
-          Outbound clicks on your products across every experience, for{" "}
-          {formatDay(data.range.start)} to {formatDay(data.range.end)}. Counted for
-          your whole brand, so the campaign filter above does not apply here.
+          Outbound clicks on your products across every experience.
         </p>
+        <ReportScopeCaption meta={parseReportMeta(data.meta)} campaignFilterId={campaignFilterId} />
         <p className="mt-2 text-xs text-copy-45">
           Product clicks record outbound traffic separately from attributed
           conversions. Orders and order value are counted only when SQRATCH has
@@ -737,12 +758,14 @@ function ConversionAnalyticsSection({
   loading,
   dateBasis,
   onDateBasisChange,
+  campaignFilterId,
 }: {
   data: BrandConversionAnalytics | null;
   error: string | null;
   loading: boolean;
   dateBasis: OrderDateBasis;
   onDateBasisChange: (next: OrderDateBasis) => void;
+  campaignFilterId: string;
 }) {
   if (error) {
     return (
@@ -774,11 +797,11 @@ function ConversionAnalyticsSection({
           <div>
             <h2 className="text-xl font-semibold">{CONVERSION_SECTION_TITLE}</h2>
             <p className="mt-2 text-sm text-copy-65">
-              Orders and order value for {formatDay(data.range.start)} to{" "}
-              {formatDay(data.range.end)} (UTC), counted only when SQRATCH has exact
-              attribution evidence from the commerce integration. Counted for your
-              whole brand, so the campaign filter above does not apply here.
+              Orders and order value, counted as attributed only when SQRATCH has exact
+              attribution evidence from the commerce integration.
             </p>
+            <ReportScopeCaption meta={data.meta} campaignFilterId={campaignFilterId} />
+            <AttributionNote />
             <DateBasisSelect value={dateBasis} onChange={onDateBasisChange} />
             <DateBasisNotes basis={data.dateBasis} fallbackOrderCount={data.fallbackOrderCount} />
           </div>
@@ -791,10 +814,11 @@ function ConversionAnalyticsSection({
               variant="outline"
               className="rounded-full border-edge/20 bg-transparent text-ink hover:bg-glass-10"
             >
-              {/* `attributed` — the SAME parameter name the orders API and
-                  the explorer's own toolbar use. A different name here would
-                  render the link inert. */}
-              <Link href="/dashboard/brand/commerce/orders?attributed=attributed">
+              {/* Same period, date basis and `attributed` filter the figures
+                  above used (see `buildOrderExplorerHref`). `attributed` is the
+                  SAME parameter name the orders API and the explorer's own
+                  toolbar use. A different name here would render the link inert. */}
+              <Link href={buildOrderExplorerHref({ range: data.range, dateBasis: data.dateBasis, attributed: "attributed" })}>
                 View attributed orders
               </Link>
             </Button>
@@ -803,7 +827,9 @@ function ConversionAnalyticsSection({
               variant="outline"
               className="rounded-full border-edge/20 bg-transparent text-ink hover:bg-glass-10"
             >
-              <Link href="/dashboard/brand/commerce/orders">View order operations</Link>
+              <Link href={buildOrderExplorerHref({ range: data.range, dateBasis: data.dateBasis })}>
+                View all orders in this period
+              </Link>
             </Button>
           </div>
         </div>
@@ -872,10 +898,9 @@ function ConversionAnalyticsSection({
 
           <div className="grid gap-4 lg:grid-cols-2">
             <PageCard>
-              <h3 className="text-lg font-semibold">By entry campaign</h3>
+              <h3 className="text-lg font-semibold">{ENTRY_CAMPAIGN_BREAKDOWN_TITLE}</h3>
               <p className="mt-1 text-xs text-copy-45">
-                Acquisition context — how the visitor arrived. Shows only campaigns
-                your brand owns; an order attributed through another brand&apos;s
+                Shows only campaigns your brand owns; an order attributed through another brand&apos;s
                 acquisition campaign still counts above but has nothing to name
                 here.
               </p>
@@ -887,11 +912,11 @@ function ConversionAnalyticsSection({
             </PageCard>
 
             <PageCard>
-              <h3 className="text-lg font-semibold">By product campaign</h3>
+              <h3 className="text-lg font-semibold">{PRODUCT_CAMPAIGN_BREAKDOWN_TITLE}</h3>
               <p className="mt-1 text-xs text-copy-45">
-                Product-authorization context — which campaign authorized the
-                purchased product. Separate from entry campaign above: one order
-                can appear in both, so the two are never added together.
+                Which campaign promoted the purchased product. Separate from entry
+                campaign above: one order can appear in both, so the two are never
+                added together.
               </p>
               <NamedBreakdownTable
                 columnLabel="Product campaign"
@@ -921,7 +946,8 @@ function ConversionAnalyticsSection({
             </PageCard>
 
             <PageCard>
-              <h3 className="text-lg font-semibold">By Product</h3>
+              <h3 className="text-lg font-semibold">{PRODUCT_BREAKDOWN_TITLE}</h3>
+              <p className="mt-1 text-xs text-copy-45">{PRODUCT_BREAKDOWN_NOTE}</p>
               <NamedBreakdownTable
                 columnLabel="Product"
                 rows={data.attributedOrdersByProduct}
@@ -1264,10 +1290,6 @@ function BreakdownTable({
  */
 function formatBounded(count: BoundedCount) {
   return count.truncated ? `${count.value}+` : count.value;
-}
-
-function formatDay(isoTimestamp: string) {
-  return isoTimestamp.slice(0, 10);
 }
 
 function MetricCard({

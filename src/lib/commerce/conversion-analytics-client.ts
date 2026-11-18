@@ -24,6 +24,7 @@
  */
 
 import type { OrderDateBasis } from "@/lib/commerce/order-date-basis";
+import { parseReportMeta, type ReportMeta } from "@/lib/report-meta";
 import { formatMoneyDisplay, getCurrencyExponent } from "./money";
 
 // ---------------------------------------------------------------------------
@@ -66,23 +67,12 @@ export type ConversionDailyPoint = {
   refundedAttributedValueByCurrency: MoneyRow[];
   /** Paid, partially paid and partially refunded orders only. Not a payment total. */
   currentNetAttributedOrderValueByCurrency: MoneyRow[];
-  /** @deprecated Older name for `attributedOrderValueByCurrency`; accepted from an older server and kept for one release. */
-  grossRevenueByCurrency?: MoneyRow[];
-  /** @deprecated Older name for `refundedAttributedValueByCurrency`. */
-  refundedRevenueByCurrency?: MoneyRow[];
-  /** @deprecated Older name for `currentNetAttributedOrderValueByCurrency`. */
-  netRevenueByCurrency?: MoneyRow[];
 };
 
-/**
- * Accepts the new names or, from a server that has not been updated yet, the
- * older ones, and normalizes to the new names. A field that is present must be
- * well-formed; one that is absent under both names is invalid.
- */
-function moneyField(record: Record<string, unknown>, current: string, older: string): MoneyRow[] | null {
-  const candidates = [record[current], record[older]].filter((value) => value !== undefined);
-  if (candidates.length === 0 || !candidates.every(isMoneyRowArray)) return null;
-  return candidates[0] as MoneyRow[];
+/** A money field must be present and well-formed. */
+function moneyField(record: Record<string, unknown>, name: string): MoneyRow[] | null {
+  const value = record[name];
+  return isMoneyRowArray(value) ? value : null;
 }
 
 function normalizeConversionDailyPoint(value: unknown): ConversionDailyPoint | null {
@@ -98,9 +88,9 @@ function normalizeConversionDailyPoint(value: unknown): ConversionDailyPoint | n
   ) {
     return null;
   }
-  const orderValue = moneyField(point, "attributedOrderValueByCurrency", "grossRevenueByCurrency");
-  const refunded = moneyField(point, "refundedAttributedValueByCurrency", "refundedRevenueByCurrency");
-  const currentNet = moneyField(point, "currentNetAttributedOrderValueByCurrency", "netRevenueByCurrency");
+  const orderValue = moneyField(point, "attributedOrderValueByCurrency");
+  const refunded = moneyField(point, "refundedAttributedValueByCurrency");
+  const currentNet = moneyField(point, "currentNetAttributedOrderValueByCurrency");
   if (!orderValue || !refunded || !currentNet) return null;
   return {
     ...(point as unknown as ConversionDailyPoint),
@@ -137,9 +127,9 @@ export function currenciesInTrend(trend: readonly ConversionDailyPoint[]): strin
   const codes = new Set<string>();
   for (const point of trend) {
     for (const row of [
-      ...(point.attributedOrderValueByCurrency ?? point.grossRevenueByCurrency ?? []),
-      ...(point.refundedAttributedValueByCurrency ?? point.refundedRevenueByCurrency ?? []),
-      ...(point.currentNetAttributedOrderValueByCurrency ?? point.netRevenueByCurrency ?? []),
+      ...point.attributedOrderValueByCurrency,
+      ...point.refundedAttributedValueByCurrency,
+      ...point.currentNetAttributedOrderValueByCurrency,
     ]) {
       codes.add(row.currencyCode);
     }
@@ -203,10 +193,14 @@ function isProviderBreakdownArray(value: unknown): value is ProviderBreakdownRow
   return Array.isArray(value) && value.every(isProviderBreakdownRow);
 }
 
-function normalizeBasis(record: Record<string, unknown>): { dateBasis: OrderDateBasis; fallbackOrderCount: number } {
+function normalizeBasis(record: Record<string, unknown>): { dateBasis: OrderDateBasis; fallbackOrderCount: number; meta: ReportMeta | null } {
   const dateBasis: OrderDateBasis = record.dateBasis === "provider" ? "provider" : "ingested";
   const count = record.fallbackOrderCount;
-  return { dateBasis, fallbackOrderCount: typeof count === "number" && count >= 0 ? count : 0 };
+  return {
+    dateBasis,
+    fallbackOrderCount: typeof count === "number" && count >= 0 ? count : 0,
+    meta: parseReportMeta(record.meta),
+  };
 }
 
 function isRange(value: unknown): value is ConversionRange {
@@ -214,17 +208,6 @@ function isRange(value: unknown): value is ConversionRange {
   const range = value as Record<string, unknown>;
   return typeof range.start === "string" && typeof range.end === "string";
 }
-
-/**
- * `[current name, older name]`. A server that has not been updated yet sends
- * only the older names; both carry identical values. The older names are
- * accepted for one release and then removed.
- */
-const MONEY_FIELD_PAIRS = [
-  ["attributedOrderValueByCurrency", "grossAttributedRevenueByCurrency"],
-  ["refundedAttributedValueByCurrency", "refundedRevenueByCurrency"],
-  ["currentNetAttributedOrderValueByCurrency", "netAttributedRevenueByCurrency"],
-] as const;
 
 export type FinancialStatusCountRow = { status: string; orders: number };
 
@@ -238,7 +221,9 @@ type NormalizedMoney = {
 
 /** Validates every money field (under either name) and returns the normalized, current-named fields. */
 function normalizeMoney(record: Record<string, unknown>): NormalizedMoney | null {
-  const [orderValue, refunded, currentNet] = MONEY_FIELD_PAIRS.map(([current, older]) => moneyField(record, current, older));
+  const orderValue = moneyField(record, "attributedOrderValueByCurrency");
+  const refunded = moneyField(record, "refundedAttributedValueByCurrency");
+  const currentNet = moneyField(record, "currentNetAttributedOrderValueByCurrency");
   if (!orderValue || !refunded || !currentNet) return null;
   const breakdown = record.financialStatusBreakdown;
   if (
@@ -274,12 +259,8 @@ export type BrandConversionAnalytics = ConversionCounts & NormalizedMoney & {
   dateBasis: OrderDateBasis;
   /** Orders dated by SQRATCH's receipt time because the store gave no date (provider basis only). */
   fallbackOrderCount: number;
-  /** @deprecated Older name for `attributedOrderValueByCurrency`; kept for one release. */
-  grossAttributedRevenueByCurrency?: MoneyRow[];
-  /** @deprecated Older name for `refundedAttributedValueByCurrency`. */
-  refundedRevenueByCurrency?: MoneyRow[];
-  /** @deprecated Older name for `currentNetAttributedOrderValueByCurrency`. */
-  netAttributedRevenueByCurrency?: MoneyRow[];
+  /** What this report covers. `null` from a server that predates it, or when malformed. */
+  meta?: ReportMeta | null;
   attributedOrdersByProvider: ProviderBreakdownRow[];
   /**
    * Already brand-owned-only by construction (the route drops a foreign
@@ -339,12 +320,7 @@ export type CreatorConversionAnalytics = ConversionCounts & NormalizedMoney & {
   range: ConversionRange;
   dateBasis: OrderDateBasis;
   fallbackOrderCount: number;
-  /** @deprecated Older name for `attributedOrderValueByCurrency`; kept for one release. */
-  grossAttributedRevenueByCurrency?: MoneyRow[];
-  /** @deprecated Older name for `refundedAttributedValueByCurrency`. */
-  refundedRevenueByCurrency?: MoneyRow[];
-  /** @deprecated Older name for `currentNetAttributedOrderValueByCurrency`. */
-  netAttributedRevenueByCurrency?: MoneyRow[];
+  meta?: ReportMeta | null;
   attributedOrdersByProvider: ProviderBreakdownRow[];
   attributedOrdersByExperience: NamedBreakdownRow[];
   attributedOrdersByLesson: NamedBreakdownRow[];

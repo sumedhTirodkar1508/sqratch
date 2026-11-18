@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCreatorContext } from "@/lib/creator-auth";
 import prisma from "@/lib/prisma";
 import { resolveCommerceClickAnalyticsDateRange } from "@/lib/commerce/commerce-click-analytics";
+import { buildReportMeta, requestedFilterNames } from "@/lib/report-meta";
 
 export async function GET(request: NextRequest) {
   return creatorAnalyticsGetImpl(request, getCreatorContext);
@@ -55,11 +56,16 @@ export async function creatorAnalyticsGetImpl(
 
     const experienceIds = experiences.map((experience) => experience.id);
 
+    // The creator's own activity is never learner activity. Anonymous rows
+    // (null user) stay in; `userId <> owner` alone would drop them.
+    const notOwner = [{ userId: null }, { userId: { not: creator.userId } }];
+
     const analyticsWhere = {
       experienceId: {
         in: experienceIds,
       },
       createdAt: { gte: start, lte: end },
+      OR: notOwner,
     };
 
     const questionWhere = {
@@ -67,6 +73,8 @@ export async function creatorAnalyticsGetImpl(
         in: experienceIds,
       },
       createdAt: { gte: start, lte: end },
+      // The creator's own questions are not learner activity.
+      askedById: { not: creator.userId },
     };
 
     const [
@@ -74,7 +82,9 @@ export async function creatorAnalyticsGetImpl(
       lessonStarts,
       lessonCompletions,
       questionCounts,
-      totalCompletedLessons,
+      completedInPeriod,
+      currentlyCompleted,
+      completionDateUnavailable,
     ] = await Promise.all([
       experienceIds.length
         ? prisma.analyticsEvent.groupBy({
@@ -121,21 +131,21 @@ export async function creatorAnalyticsGetImpl(
             },
           })
         : [],
-      experienceIds.length
-        ? prisma.lessonProgress.count({
-            where: {
-              isCompleted: true,
-              lesson: {
-                course: {
-                  experienceId: {
-                    in: experienceIds,
-                  },
-                },
+      // Completion is counted from `completedAt`, written once. Rows completed
+      // before it existed have no recorded time and are reported separately.
+      ...(["inPeriod", "current", "unrecorded"] as const).map((kind) =>
+        experienceIds.length
+          ? prisma.lessonProgress.count({
+              where: {
+                isCompleted: true,
+                lesson: { course: { experienceId: { in: experienceIds } } },
+                OR: notOwner,
+                ...(kind === "inPeriod" ? { completedAt: { gte: start, lte: end } } : {}),
+                ...(kind === "unrecorded" ? { completedAt: null } : {}),
               },
-              updatedAt: { gte: start, lte: end },
-            },
-          })
-        : 0,
+            })
+          : 0,
+      ),
     ]);
 
     const viewMap = new Map(
@@ -171,6 +181,13 @@ export async function creatorAnalyticsGetImpl(
         // The period actually applied (UTC), including when the request named
         // no dates and the default window was used.
         range: { start: start.toISOString(), end: end.toISOString() },
+        meta: buildReportMeta({
+          period: { start, end },
+          dateBasis: "event",
+          scope: experienceId ? "experience" : "creator",
+          appliedFilters: experienceId ? { experienceId } : {},
+          unsupportedFilters: requestedFilterNames(request.nextUrl.searchParams, ["campaignId"]),
+        }),
         experiences,
         options: { experiences: ownedExperiences },
         totals: {
@@ -184,7 +201,11 @@ export async function creatorAnalyticsGetImpl(
             0,
           ),
           questions: byExperience.reduce((total, row) => total + row.questions, 0),
-          completedLessonsFromProgress: totalCompletedLessons,
+          // Distinct measures: first completed in the period (from the immutable
+          // completedAt), complete right now, and complete with no recorded date.
+          lessonsCompletedInPeriod: completedInPeriod,
+          lessonsCurrentlyComplete: currentlyCompleted,
+          completionDateNotRecorded: completionDateUnavailable,
         },
         byExperience,
       },

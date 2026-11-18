@@ -153,7 +153,7 @@ async function moveLessonProgressRow(
   // latest committed values and a concurrent anonymous save is never lost.
   const row = await tx.lessonProgress.findUniqueOrThrow({
     where: { id: rowId },
-    select: { lessonId: true, lastPositionSeconds: true, isCompleted: true },
+    select: { lessonId: true, lastPositionSeconds: true, isCompleted: true, completedAt: true },
   });
 
   await tx.lessonProgress.delete({ where: { id: rowId } });

@@ -4,32 +4,31 @@ This is the remaining implementation backlog. Original review evidence is histor
 
 ## 1. Current baseline
 
-P00–P08 implement disposable database tests, QR history safeguards, publication enforcement, atomic approvals, active-administrator protection, safer media persistence, brand-context preconditions and community display-name privacy. Manual acceptance covered the principal QR conflicts, private/public access, approval conflict, administrator self-demotion, cross-tab brand conflict and display-name privacy. Some browser and provider checks remain below. Draft experiences must return 404 on public viewer routes for everyone; authenticated creator-management screens retain editing and publishing access. Owner activity must not earn points or count as learner activity.
+P00–P11, P14, P20, P22, P23, P25, P26, P28, P36 and P38 are shipped and deployed (disposable database tests, QR history safeguards, publication enforcement, atomic approvals, administrator protection, safer media persistence, brand-context preconditions, community display-name privacy, anonymous-transfer, QR batch archive, creator dashboard reliability, honest analytics names, password recovery, customer home, QR inventory search, commerce connection overview and order-date reporting). The P20 migration (`20261116120000_add_password_reset_token`) was applied to production by the owner. Their contracts live in `docs/points-ledger.md`, `docs/prisma-migrations.md`, `docs/agent-context.md` and `docs/env-vars.md`.
 
-P09, P10, P11, P22, P25 and P36 shipped earlier: one shared anonymous-transfer service, truthful transfer status, QR batch archive (migration `20261114120000_add_qr_batch_archive`, deployed to production), independent shop product and reward states, stable creator selectors, and honest analytics names. P14, P20, P23, P26, P28 and P38 are implemented on `claude/account-ux-commerce-analytics` and await review: admin account creation survives a mail failure and offers Resend; password recovery (30-minute single-use token, `PasswordResetToken` migration) signs out every session; the customer home offers Continue, unlocked experiences and points; QR inventory searches and pages on the server with searchable batch and campaign pickers; the Store page lists every connection with completed-sync versus attempt facts, and product previews no longer stamp `lastProductSyncAt`; conversion reports choose between the store's order date (default) and SQRATCH's receipt date and count fallback orders. Their specifications were removed from this backlog; the contracts live in `docs/points-ledger.md`, `docs/prisma-migrations.md` and `docs/agent-context.md`.
+Implemented on branch `claude/remaining-correctness-ux-analytics` and awaiting review and deployment: **P12** (stop new QR redemptions, separate from archiving and deletion), **P13** (staged lesson-video ownership and claim-based cleanup), **P21** (atomic UTC-day Q&A limit), the Shopify reward-code collision retry fix, **P24** (refreshable approval status), **P27** (attached versus discoverable experiences), **P29** (rewards workspace: provider tabs, claim paging, catalog search), **P30** (all connections and full memberships in admin), **P31** (shared confirmation dialog and unsaved-work protection), **P32** (URL-backed filters), **P35** (client-side sidebar navigation, dashboard loading and error boundaries, request-path forwarding), **P37** (immutable `completedAt`), **P39** (report scope, attribution captions and drilldown context), **P44** (opt-in shared rate-limit store and a credential sign-in throttle) and the small corrections (QR `NEW` filter excludes `INVALID`, stale sync attempts read "Did not finish", the deprecated `gross*`/`net*` analytics fields are removed). P45 was evaluated and not changed; P46 is done with one documented exception. Their specifications were removed from this backlog.
 
 ## 2. Outstanding issues
 
-- **P1 — Migration rollout, P20:** `20261116120000_add_password_reset_token` (one additive table) is verified only on a disposable database. The owner applies it to production before deploying the release, after the preflight in `docs/prisma-migrations.md`. `EMAIL_VERIFICATION_CODE_PEPPER` must be set in production (reset tokens reuse it); the reset mail uses the existing mail transport.
-- **P2 — P36 follow-up (A-08), still open:** the deprecated analytics field names (`grossAttributedRevenueByCurrency`, `refundedRevenueByCurrency`, `netAttributedRevenueByCurrency` and the trend `…RevenueByCurrency` fields) are retained. The Brand and Creator analytics pages parse them only as a fallback and no other consumer was found, but P36 has only just gone live and old tabs may still read them. Remove them and the parser fallback in the release after this one.
-- **P2 — Unique-violation shape:** with the PostgreSQL driver adapter a P2002 carries the violated constraint in `meta.driverAdapterError`, not `meta.target`. Admin create, update and email transfer now use `isUniqueViolationOn` (`src/lib/prisma-errors.ts`); before this, a duplicate email on admin create returned 500 instead of 409. `src/app/api/rewards/shopify/redeem/route.ts` still reads `meta.target` to decide whether a code collision is retryable and likely never retries; fix it separately with a test.
-- **P2 — Password recovery limits:** per-IP limits read the first `x-forwarded-for` entry and are per instance (P44). An unverified account can reset its password but still cannot sign in until it verifies. Middleware page gating accepts a pre-reset JWT until some request runs the session callback; data behind `getServerSession` is protected. Expired and consumed reset rows are removed only on the next request or reset for that user.
-- **P3 — Minor review notes (not fixed):** the Order Explorer link under the conversion report does not carry the date basis (it orders by receipt date); the QR `NEW` status filter also includes `INVALID` codes (matching the list's NEW label); a crashed sync run reads "In progress" without an age; the QR pickers use a simple dialog pattern without arrow-key navigation; a resend to a transferred account uses the default 10-minute code lifetime; a reset gives an account without a password one.
-- **P3 — Customer home:** the experience list is capped at 12 with a "Showing 12 of N" line; there is no "view all" page. Add one only if customers hold more.
-- **P3 — Store page:** Commerce7 reconnect, settings and diagnostics render only for the brand's active connection; a second Commerce7 connection that needs reconnecting shows guidance but no control. Product previews use `previewProducts`; the legacy `syncProducts` (which still stamps the connection) has no remaining caller outside the persisted-sync fallback path and can be removed with `lastProductSyncAt` writers in a later cleanup.
-- **P3 — Schema discrepancies (read-only findings, nothing changed):** see `docs/prisma-migrations.md`, "Known schema discrepancies". The `Campaign.brandId` foreign key and one `CampaignCommerceProduct` index name differ from the Prisma schema; both are cosmetic and any correction needs a separate owner-reviewed migration.
-- **P2 — D-02 accepted default:** sign-in now also pays completion rewards an account has earned but not been paid (see `docs/points-ledger.md`); confirm the retroactive-payment consequence is acceptable.
-- **P2 — Residual acceptance gaps for P09–P36:** exercised in the in-app browser against a disposable database: blocked-transfer sign-in, Retry, normal sign-in, post-failure editor, selector and stale-response behavior, archive/filter/scan/unarchive, shop failure states and recovery, comment refresh, seek keyboard control, analytics labels against synthetic orders. Also exercised against a disposable database with a synthetic code (no mail sent): wrong code (nothing consumed or transferred), correct code (verified, transfer and rewards applied once, redirect to `/login` with `next` kept) and the following sign-in (no duplicate awards). Not exercised: delivery through a real mail provider (a local SMTP sink captured the mail), claiming a reward from the shop UI with real provider offers, screen-reader passes (seek control, QR pickers, recovery pages), live Shopify/Commerce7 behavior including a real product preview, and the batch Next/Previous controls and Edit-dialog campaign picker in a browser (covered by tests).
-- **P1 — P13 / F-03b, C-04:** Media reference checks are not atomic with attachment; staged asset claiming is needed. Unknown save outcomes can leave orphans. Real isolated object-storage integration, response-loss and failure-path browser verification remain outstanding (X-12); do not claim immediate signed-URL revocation.
-- **P1 — P07 / F-08:** Expected-brand headers remain optional for old tabs. After the compatibility release require them on all applicable brand mutations, retaining membership authorization and clear 409 conflicts. Browser-check rewards, products, uploads, global ADMIN and VIEWER cases.
-- **P1 — P01/P02:** Browser-check deletion of untouched batches, individual deletion, all history blockers, stale eligibility conflicts, image failure and legacy printed redirects. Never destroy historical QR evidence.
-- **P1 — P03/P04/P05/P08:** Complete remaining browser acceptance: non-owner and owner draft management, private/inactive content, no owner analytics or awards; concurrent decision UI; admin history deletion and simultaneous actions; nameless comment/question/answer displays. Existing PostgreSQL and mocked tests do not replace browser or external-service checks.
-- **P2 — X-16:** Design global security headers with Shopify/Commerce7 embedding exemptions and report-only CSP; separate work, not part of the numbered phases.
-- **P1 — D-16 / X-11:** Decide reward funding and budget; creator self-award prevention does not stop collusion with another account.
-- **P2 — Past ledger drift:** Owner should run the read-only drift query in `docs/points-ledger.md`; any repair requires a separate data decision.
-- **P2 — Deferred analytics:** C-07 captured payments (the order-value labels shipped in P36) and A-11 payment/refund activity need provider sandbox evidence and appropriate timestamps. A-17 conversion rates need a defined cohort, window and anonymous/account deduplication. A-22 product-health measures need instrumentation and baselines.
-- **P2 — External verification:** GA4 live provider receipt, real storage behavior and deployed provider journeys require owner-authorized sandbox verification. Do not use production for automated QA.
-- **P3 — O-06 / O-04 / F-08a:** Defer worker throughput changes until P40 measurements; any future cache keys include brand, connection, filters and permission-sensitive state. Retryable QR/profile-image cleanup remains future work beyond P13.
+- **P1 — Migration rollout (this branch):** four additive migrations, none with a backfill, applied by the owner before deploying the release, after the preflight in `docs/prisma-migrations.md`: `20261117120000_add_qr_redemption_stop`, `20261117130000_add_staged_asset`, `20261117140000_add_lesson_progress_completed_at`, `20261117150000_add_rate_limit_counter` (only read when `RATE_LIMIT_STORE=postgres`). Verified only on disposable databases.
+- **P1 — P13 follow-ups:** nothing schedules the asset sweeper (`docs/lesson-video-uploads.md`); run the shared-storage-path check first. Real isolated object-storage acceptance (missing-object status, response-loss, failure paths) has not been run. Deleting an experience or a creator account cascades to lessons without releasing their videos. QR and profile images still use best-effort cleanup.
+- **P2 — P12 follow-ups:** a scan of a stopped code writes a `qr_scan_stopped` event, which (like any scan event) keeps an unused code from being deleted. D-04 (whether `Campaign.isActive` or `Brand.isActive` should affect visitors) is undecided; run the read-only count of `isActive = false` rows for `QRCode`, `QRCodeBatch` and `Campaign` before deciding. Stopped codes are labelled STOPPED in the brand inventory, CSV export, `api/qr/get-all-qrcodes`, `api/qr/check-qrcode` (`redemptionStopped`) and the admin dashboard stats (`stoppedCount`); the stored status values are unchanged.
+- **P2 — P07 / F-08:** expected-brand headers remain optional for old tabs. After the compatibility release require them on all applicable brand mutations, keeping membership authorization and clear 409 conflicts.
+- **P2 — P31/P32 gaps:** in-app links, reload, tab close, brand switching and "Edit another offer" all ask before discarding a dirty form; the browser Back button and programmatic `router.push` are not intercepted (the browser's own prompt covers reload and close). The dialogs have not had a screen-reader or keyboard pass. Analytics date filters seed from the URL as dates; the order explorer does not write the order-number search to the URL on purpose.
+- **P3 — P29/P30 notes:** Commerce7 offers page 50 at a time (`offersCursor`); refreshing the panel returns to the first page. The admin membership expander loads on demand.
+- **P2 — P44 residual:** only sign-in, sign-up, verification resend and password recovery use the shared store, and only when `RATE_LIMIT_STORE=postgres`; scans, analytics collection, waitlist and Shopify OAuth start stay per-instance. Sign-up, resend and recovery per-address limits trust the first `x-forwarded-for` entry (correct behind Vercel); the sign-in throttle prefers platform headers. An unverified account can reset its password but still cannot sign in until it verifies; middleware page gating accepts a pre-reset JWT until some request runs the session callback (data behind `getServerSession` is protected). Expired reset rows are removed only on the next request or reset for that user.
+- **P3 — P37/P39 notes:** `completedAt` is never backfilled, so historical completions appear as "date not recorded". The learner "qualified in period" measure waits for P16–P18. The order explorer pages by receipt date while filtering by the chosen basis.
+- **P3 — P45/P46:** P45 not done: `getServerSession` reads the user row once per call (session revocation depends on it) and some brand handlers resolve it twice; per-request memoization is not reliable in route handlers and the cost is negligible at the current scale, so no caching was added. P46: `npm audit --omit=dev` is clean. The only remaining advisory is the dev-only high-severity `xlsx` (no fixed release on the registry), imported solely by `scripts/import-legacy-printed-stickers.ts`; accepted as a documented exception until that script is retired or moved out of the application package.
+- **P3 — Minor notes:** the QR pickers have no arrow-key navigation; a resend to a transferred account uses the default 10-minute code lifetime; a reset gives an account without a password one; the customer home caps experiences at 12 with no "view all" page; Commerce7 reconnect, settings and diagnostics render only for the brand's active connection; the legacy `syncProducts` (which stamps the connection) has no caller outside the persisted-sync fallback and can be removed with the `lastProductSyncAt` writers.
+- **P3 — Schema discrepancies (read-only findings, nothing changed):** see `docs/prisma-migrations.md`, "Known schema discrepancies". Historical migrations cannot be replayed from an empty database (production was baselined); any correction needs a separate owner-reviewed migration.
+- **P2 — D-02 accepted default:** sign-in also pays completion rewards an account has earned but not been paid (see `docs/points-ledger.md`); confirm the retroactive-payment consequence is acceptable.
+- **P1 — D-16 / X-11:** decide reward funding and budget; creator self-award prevention does not stop collusion with another account.
+- **P2 — Acceptance not yet run in a browser or against providers:** delivery through a real mail provider; claiming a reward from the shop UI with real provider offers; live Shopify/Commerce7 behavior including a product preview; real object storage (P13); screen-reader passes (seek control, QR pickers, recovery pages, dialogs); the brand-switch dirty prompt with a multi-brand user; the creator analytics completion cards; browser checks for P01/P02 (deletion of untouched batches, history blockers, legacy printed redirects) and P03/P04/P05/P08 (draft management, concurrent decisions, nameless displays). Existing PostgreSQL and mocked tests do not replace them.
+- **P2 — X-16:** design global security headers with Shopify/Commerce7 embedding exemptions and a report-only CSP; separate work.
+- **P2 — Past ledger drift:** the owner should run the read-only drift query in `docs/points-ledger.md`; any repair needs a separate data decision.
+- **P2 — Deferred analytics:** C-07 captured payments and A-11 payment/refund activity need provider sandbox evidence and timestamps. A-17 conversion rates need a defined cohort, window and anonymous/account deduplication. A-22 product-health measures need instrumentation and baselines.
+- **P2 — External verification:** GA4 live provider receipt, real storage behavior and deployed provider journeys need owner-authorized sandbox verification. Do not use production for automated QA.
+- **P3 — O-06 / O-04 / F-08a:** defer worker throughput changes until P40 measurements; any future cache keys include brand, connection, filters and permission-sensitive state.
 - Other previously noted but unverified issues (signup enumeration, comment length/author deletion, upload content sniffing) require separate verification; do not silently classify as resolved.
 
 ### Pending finding index
@@ -38,156 +37,41 @@ These rows retain review identifiers and proposed phase mappings. The mapped pha
 
 | ID | Outstanding finding | Priority | Action | Phase |
 |---|---|---|---|---|
-| C-03 | Archive and revocation differ | P1 | Add redemption stop as separate state from archive (archive shipped in P11) | P12 |
-| C-04 | A reference check alone is not race-safe | P1 | Stop unsafe cleanup first, then claim-based cleanup | P06, P13 |
 | C-05 | Qualification must be a staged transition | P1 | Additive policy per lesson, default legacy | P16–P19 |
 | C-07 | Correct labels first; captured-payment metrics later | P2 | Captured-payment metrics remain deferred pending provider evidence (labels shipped in P36) | H |
-| C-08 | Filters are not identical across panels | P2 | Share controls only where semantics match | P39 |
 | C-09 | Fix behavior before reorganizing navigation | — | Navigation consolidation is last | P43 |
-| F-01b | Archive, stop-new-redemptions, delete-unused-draft semantics | P1 | Per-code revocation; keep the strict unused-draft deletion predicate (archive shipped in P11) | P12 |
-| F-01c | `isActive` is not enforced by scan or redemption; inspect values first | P1 | Do not reuse `isActive`. Add explicit state after a read-only value audit | P12 |
-| F-01d | External image cleanup must follow persistence and be retryable | P1 | Reorder; make cleanup best-effort and later retryable | P01, P02, P13 |
-| F-03b | Staged assets, claim-before-delete, retryable deletion | P2 | Staged-asset table and sweeper | P13 |
 | F-04b | Record actor, time and reason; separate applicant and internal notes | P2 | Additive fields | P15 |
 | F-05 | Client completion authorizes spendable rewards | P1 | Server-evaluated checkpoint policy, staged | P16–P19 |
 | F-05a | Transition rules: preserve config, ledger, legacy labelling, no re-earning | P1 | Keep ledger keys; add policy enum | P16–P19 |
 | F-07a | Explain blocked actions; record administrative changes | P2 | Error copy in P05; audit table in P15 | P05, P15 |
 | F-08a | Brand scope in caches and request identities; clear on switch | P3 | Guard covers the risk today; keep as a rule for future caching | P07 |
-| U-04 | Pending approval is a static screen | P3 | Refreshable status | P24 |
-| U-12 | Q&A count then create allows overrun | P2 | Atomic capacity check | P21 |
-| U-14 | 50-result discovery can omit attached experiences | P2 | Separate attached list from discovery | P27 |
-| U-16 | Connection trouble switches or hides the rewards workspace | P2 | Preserve provider workspace and history | P29 |
-| U-17 | Limited product subsets drive selection and diagnostics | P2 | Paginated canonical picker; resolve offer references by id | P29 |
-| U-18 | Newest-100 caps hide older claims | P2 | Pagination and status filters for Commerce7; bound the customer list | P29 |
-| U-20 | Provider panels have inconsistent surrounding controls | P3 | Move the selector inside the shell | P29 |
-| U-22 | Admin brands shows Shopify only | P2 | Canonical connections with status | P30 |
-| U-24 | Only three memberships shown, no total | P3 | Count and full detail view | P30 |
 | U-25 | Decision reason missing from the UI | P2 | Reason input, required on reject | P15 |
-| U-26 | Catalog truncation is not a redemption bypass | — | Confirm in P29 by reading the claim route before changing pickers | P29 |
 | N-02 | Creator: manage one experience | P3 | Experience context header | P34 |
 | N-03 | Brand: operate one campaign | P3 | Campaign workspace nav | P33 |
-| N-04 | Superadmin: actionable queue | P3 | State and history via P15, P30, P40 | P15, P30, P40 |
+| N-04 | Superadmin: actionable queue | P3 | State and history via P15, P40 | P15, P40 |
 | N-05 | Consolidated navigation sets per role | P3 | Last | P43 |
 | K-01 | Campaign flow as contextual guidance, not a wizard | P3 | Guidance strip | P33 |
 | K-02 | Readiness tiers: blocker, warning, optional, provider limitation | P3 | Server-computed readiness | P33 |
 | K-03 | Do not block content campaigns lacking commerce | — | Acceptance criterion | P33 |
-| K-04 | Attachment stays immediate; show creator identity | P3 | Show creator name in attach UI | P27 |
-| S-01 | Preserve filters in URLs | P3 | URL-backed filters | P32 |
-| S-02 | Preserve unsaved work after recoverable errors | P2 | Covered per surface | P31 |
-| S-03 | Warn before brand switch or navigation that discards edits | P3 | Dirty-form guard | P31 |
-| S-04 | Consistent destructive confirmation | P3 | Shared AlertDialog with stated consequences | P31 |
-| S-05 | Show partial success explicitly | P3 | Per surface (shown for admin account creation in P14) | P31 |
-| S-06 | Panel-level retries | P3 | Per surface | P31 |
 | S-07 | Consolidate Contact and Support | P3 | Merge content, keep both URLs | P43 |
 | S-08 | Consolidate overlapping admin routes after parity | P3 | Consolidate with redirects | P43 |
-| A-02 | Completion counts use mutable timestamps | P2 | Add an immutable `completedAt`; the mutable-timestamp label shipped in P36 | P37 |
-| A-06 | Drilldown loses date and filter context | P3 | Carry supported scope | P39 |
 | A-07 | All matching orders are materialized | P3 | Measure first | P42 |
-| A-08 | Do not silently change a field's financial meaning | — | Remove the deprecated `gross*`/`net*` analytics field names one release after P36 shipped | P36 follow-up |
-| A-09 | Every report states period, timezone, basis, scope, statuses, currency, freshness | P3 | Shared response metadata | P39 |
 | A-11 | Payment and refund activity by date | P3 | Order-cohort reporting shipped in P38; activity-by-period reporting stays deferred until provider payment and refund timestamps are stored | H |
-| A-13 | Entry, product-authorizing and managed campaign are distinct | P3 | Section-specific scope labels | P39 |
-| A-14 | Shared filter controls only where semantics match | P3 | Scope labels per panel | P39 |
-| A-15 | Product breakdown must state orders-containing versus allocated value | P3 | Read the label in P39; state "orders containing" | P39 |
 | A-16 | Place reporting beside decisions (ten surfaces) | P3 | Delivered incrementally | P33, P34, P40 |
 | A-17 | Funnels only where evidence supports them | P3 | Stage counts only | P41 |
-| A-18 | Attribution is not incrementality or commission | — | Acceptance criterion | P39, P41 |
-| A-19 | Minimum reporting response contract | P3 | Shared metadata type | P39 |
-| A-20 | Immutable business events; no manufactured history | P2 | Add `completedAt`, set once, never backfilled | P37 |
-| ST-B | Stage B: shared correctness contracts | P1–P2 | Kept; qualification split into four phases | P12–P19 |
-| ST-C | Stage C: daily workflow friction | P2–P3 | Kept | P21, P24, P27, P29–P35 |
-| ST-D | Stage D: correct analytics | P2–P3 | Kept (P38 shipped) | P37, P39–P41 |
-| ST-E | Stage E: consolidate and optimize | P3 | Conditional phases | P42–P45 |
+| ST-B | Stage B: shared correctness contracts | P1–P2 | Remaining: audit trail and qualification (four phases) | P15–P19 |
+| ST-C | Stage C: daily workflow friction | P2–P3 | Remaining: campaign and experience workspaces | P33, P34 |
+| ST-D | Stage D: correct analytics | P2–P3 | Remaining: operations visibility and funnel counts | P40, P41 |
+| ST-E | Stage E: consolidate and optimize | P3 | Conditional phases | P42, P43 |
 | I-04 | Versioned qualification and checkpoint records | P1 | Additive models | P16 |
-| I-05 | Separate archival and redemption-availability semantics | P1 | Additive redemption-stop columns (archive columns shipped in P11) | P12 |
-| I-06 | Accurate analytics names, basis, coverage, pagination metadata | P2 | Additive fields | P37–P39 |
-| O-01 | Sidebar uses plain anchors | P3 | `next/link` | P35 |
-| O-02 | Workspace loading and error boundaries | P3 | Add at dashboard segment level | P35 |
-| O-03 | Debounce searches; reject superseded results | P3 | Apply to remaining lists | P32 |
 | O-05 | Monitor worker backlog and oldest pending age | P3 | Read-only operations panel | P40 |
-| O-07 | Shared rate limiting where deployment-wide enforcement is required | P2 | Shared store; login throttle | P44 |
-| O-08 | Keep revocation checks; remove redundant per-request work | P3 | Conditional on measurement | P45 |
 | O-09 | Scale risks are not measured outages | — | Baselines before optimizing | P42 |
-| T-01 | QR lifecycle acceptance | — | Phase tests | P12 |
-| T-02 | QR concurrency: consistent winner | — | Phase tests | P12 |
 | T-05 | Participation: client completion and seeking do not qualify | — | Phase tests | P16–P18 |
-| T-06 | Media: lost response keeps committed media; cleanup cannot race | — | Phase tests | P06, P13 |
-| T-10 | List completeness beyond 50 and 100 (attach list, Commerce7 claims) | — | Phase tests | P27, P29 |
-| T-12 | Analytics truthfulness cases | — | Phase tests | P37, P39 |
-| T-13 | UI recovery | — | Phase tests | P31, P32 |
-| T-14 | Accessibility | — | Manual browser pass | P31 |
 | T-15 | Performance comparison before and after | — | Baseline first | P42 |
-| X-04 | Scan and public campaign ignore `Campaign.isActive` and `Brand.isActive` | P2 | Product decision D-04 before any enforcement | P12 |
 | X-11 | Creator reward budgets remain undecided; colluding accounts can earn points | P1 | Preserve the owner-award exclusion and decide funding and limits | D-16 |
-| X-12 | Missing-object behavior of storage signing remains unverified | P2 | Verify per-lesson fallback with isolated storage | P06, P13 |
-| X-14 | Middleware sets `x-pathname` on the response, so layouts cannot read it | P3 | Forward as a request header | P35 |
-| X-15 | Q&A daily window uses the server-local day | P3 | Define as UTC day | P21 |
 | X-16 | No global `nosniff`, frame or CSP headers | P2 | Separate hardening work | H |
-| DEP-01 | `xlsx` high-severity advisories, no fix, dev-only | P3 | Replace or isolate | P46 |
-| DEP-02 | Moderate advisories in `@typescript-eslint/*` and `minimatch` | P3 | Align versions | P46 |
 
 ## 3. Remaining implementation phases
-
-### P12 — Stop new QR redemptions
-
-- **Priority and complexity:** P1, L. New enforcement on the public scan path with a concurrency requirement.
-- **Problem and evidence:** No revocation exists. Scan loads the code and checks only `status === "USED"` (`src/app/api/public/scan/route.ts:35-64`). Redemption matches `id` and `status: "NEW"` only (`src/lib/qr-redemption.ts:25-36`). The anonymous path creates an unlock without touching the code row (`src/app/api/public/scan/route.ts:170-200`). The merge paths redeem on login and delete the anonymous unlock when redemption fails (`src/app/api/progress/merge/route.ts:174-191`).
-- **Desired outcome:** A brand can stop new redemptions for a batch or a single code. After the stop, no new unlock or point is created from those codes. People who already unlocked keep access and points. Someone scanning a stopped code sees a clear explanation. Redemption racing a stop has exactly one winner.
-- **Scope:** migration adding `QRCode.redemptionStoppedAt DateTime?`, `QRCodeBatch.redemptionStoppedAt DateTime?` and `redemptionStoppedById String?`; `src/lib/qr-redemption.ts`; `src/lib/qr-lifecycle.ts`; `src/app/api/public/scan/route.ts`; `src/lib/anonymous-transfer.ts`; new brand routes `POST .../qr-batches/[id]/stop-redemptions`, `.../resume-redemptions` and the per-code equivalents; `src/app/q/[qrCodeData]/page.tsx`; `src/app/(withSidebar)/dashboard/brand/qr-batches/page.tsx`.
-- **Implementation requirements:**
-  1. State lives on the code row. Stopping a batch runs one transaction: set the batch timestamp, then `updateMany` codes `where: { batchId, status: "NEW", redemptionStoppedAt: null }` to the same timestamp. USED codes are not modified.
-  2. `redeemQrCodeForUser` adds `redemptionStoppedAt: null` to its existing `updateMany` predicate, unless the caller passes `honorExistingAnonymousUnlock: true` (item 6). Because the stop and the redemption both update the same row, PostgreSQL's row lock and predicate recheck give a strict winner in both orderings. Keep the `status: "NEW"` filter.
-  3. When the update count is 0, return a distinct `stopped: true` result if the row is NEW with a stop timestamp.
-  4. Scan, signed-in path: on `stopped`, create no unlock and no point; respond `409 { code: "QR_REDEMPTION_STOPPED", campaignSlug }` unless the viewer already holds an unlock for the campaign, in which case respond as today.
-  5. Scan, anonymous path: in one transaction, first run a conditional no-op update on the code (`where: { id, redemptionStoppedAt: null }`, setting `updatedAt`) and require `count === 1`, then create the anonymous unlock. This puts the anonymous path under the same row lock. The existing `P2002` handler for a concurrent duplicate unlock (`src/app/api/public/scan/route.ts:189-199`) must move outside the transaction, because a failed statement aborts the transaction in PostgreSQL.
-  6. Transfer on login: an anonymous unlock that still exists is the evidence. After this phase every surviving anonymous unlock was created either before any stop existed or under the row lock while the code was not stopped. So the transfer calls `redeemQrCodeForUser` with `honorExistingAnonymousUnlock: true` and the stop predicate is skipped for it (D-03). Do not compare timestamps: the stop timestamp is chosen before a batch update that can take time, so a timestamp comparison would reject unlocks that legitimately won the row lock.
-  7. `/q/{code}` shows: "This code is no longer accepting new redemptions. If you already unlocked this campaign, sign in to continue." Record a `qr_scan_stopped` analytics event.
-  8. Resuming a batch clears only the codes whose `redemptionStoppedAt` equals the batch's stop timestamp, then clears the batch. A code stopped individually keeps its own timestamp and is not resumed by a batch resume. Both actions are recorded (P15 audit if shipped).
-  9. Before authoring the migration, include in the phase notes a read-only query for the owner that counts rows where `QRCode.isActive`, `QRCodeBatch.isActive` or `Campaign.isActive` is false. This phase does not enforce those fields. The counts inform D-04.
-- **Dependencies:** P00, P02, P09, P11.
-- **Compatibility and migration:** additive nullable columns; all existing codes remain redeemable. The scan API gains one new 409 code; the existing page treats any non-OK response as invalid, so deploy the page change in the same release. Rollback: remove the predicate; columns can stay.
-- **Acceptance criteria:**
-  - After a stop, a new signed-in scan creates no unlock, no ledger row and no status change.
-  - After a stop, a new anonymous scan creates no unlock.
-  - A user who unlocked before the stop keeps private-course access and points, and re-scanning takes them to the campaign.
-  - An anonymous unlock that exists converts on login whether or not the code was stopped afterward; an anonymous request that lost the row lock to the stop created no unlock.
-  - Fifty concurrent redemptions against a concurrent stop produce a state where every code is either USED with a ledger row for its redeemer, or NEW and stopped. Never both, never neither. (A redeemer who already held an unlock for the campaign gets no second unlock, as today.)
-  - Resuming a batch does not resume a code that was stopped on its own.
-  - Two concurrent anonymous scans of the same code from one session return success, not 500.
-  - Archive (P11) alone never blocks redemption.
-- **Testing:** L1 for each branch. L2: stop versus signed-in redemption in both lock orders; stop versus anonymous scan; a slow batch stop with an anonymous scan that wins a row lock mid-update, followed by login transfer; batch resume with an individually stopped code. L3: scan message.
-- **Regression risks:** the double-redemption guard; anonymous unlock partial unique index (migration `20260615113320`); `hasRedeemedQrWarning`; legacy `/redeemQR` redirect.
-- **Decision blockers:** D-03 (honor earlier anonymous unlocks; proposed yes) and D-04 (whether `Campaign.isActive` and `Brand.isActive` should affect visitors; proposed: not in this phase).
-
-### P13 — Staged asset ownership and safe cleanup
-
-- **Priority and complexity:** P2, L.
-- **Problem and evidence:** Nothing records an upload between authorization and attachment. Server-side deletions of replaced or removed videos only log on failure (`src/app/api/creator/lessons/route.ts:69-87,513-515,592-594`). After P06, unknown-outcome uploads accumulate with no owner.
-- **Desired outcome:** Every lesson-video object has a tracked state. Attachment and cleanup compete for the same row, so an object is never deleted after it is attached. Failed deletions retry.
-- **Scope:** migration adding `StagedAsset`; `src/lib/lesson-video-upload-handler.ts` and `src/app/api/uploads/video/route.ts` (issue); `src/app/api/creator/lessons/route.ts` (attach, replace, remove); `src/app/api/creator/courses/route.ts` (course delete removes lesson videos inline at `:11-19,366`); `src/app/api/uploads/storage-object/route.ts` lesson branch and ADMIN branch (`:201-204`); new `src/lib/asset-sweeper.ts` and `src/app/api/internal/asset-sweeper/route.ts`; `docs/lesson-video-uploads.md`; `docs/env-vars.md`.
-- **Implementation requirements:**
-  1. `StagedAsset { id, bucket, path, kind, ownerUserId, courseId, lessonId?, status, createdAt, attachedAt?, cleanupClaimedAt?, deletedAt?, attempts, lastError? }` with `@@unique([bucket, path])` and status `STAGED | ATTACHED | CLEANUP_CLAIMED | DELETED`.
-  2. Issue: create a `STAGED` row when the signed upload URL is created.
-  3. Attach: the lesson create and update are bare calls today (`src/app/api/creator/lessons/route.ts:318,480`), so first wrap each in a transaction. Inside it, `updateMany({ where: { bucket, path, status: "STAGED" }, data: { status: "ATTACHED", lessonId, attachedAt } })`. Accept `count === 1`, or an existing row already `ATTACHED` to the same lesson (idempotent retry). Fail the transaction with `409 { code: "ASSET_UNAVAILABLE" }` when the row is `CLEANUP_CLAIMED` or `DELETED`, or is `ATTACHED` to a different lesson. One object belongs to at most one lesson.
-  4. Transition rule for uploads authorized before deployment: when no row exists, fall back to the existing existence check and insert an `ATTACHED` row, but only if no other lesson already references that bucket and path. Remove this fallback in a later release.
-  5. Replace, remove and course delete: after commit, release the old object with a conditional update, `updateMany({ where: { bucket, path, status: "ATTACHED", lessonId: oldLessonId }, data: { status: "CLEANUP_CLAIMED" } })`. When no row exists (an object from before this phase), insert a `CLEANUP_CLAIMED` row only if no remaining lesson references that bucket and path. Never claim a row attached to another lesson. Do not delete inline.
-  5a. The ADMIN branch of the storage delete endpoint must refuse lesson-video objects that have an `ATTACHED` row or a referencing lesson, and otherwise go through the same claim.
-  5b. Before this phase ships, the owner runs a read-only check for lessons that share a storage path (`GROUP BY "videoStorageBucket", "videoStoragePath" HAVING count(*) > 1`). Lesson saves currently accept any existing object under the course path (`src/app/api/creator/lessons/route.ts:29-66`), so shared references are possible. If any exist, they are handled before the one-object-one-lesson rule is enforced.
-  6. Client cleanup request (the P06 "rejected" case): `updateMany({ where: { bucket, path, status: "STAGED", ownerUserId }, data: { status: "CLEANUP_CLAIMED" } })`. If the count is 0, respond `409 ASSET_IN_USE`. The endpoint no longer deletes directly.
-  7. Sweeper: authenticated with the cron secret like the existing internal routes. Each run (a) claims `STAGED` rows older than a configurable age (proposal: 24 hours) with a conditional update, and (b) processes a bounded batch of `CLEANUP_CLAIMED` rows: delete from storage, set `DELETED`; on failure increment `attempts` and store `lastError`. A claimed row never returns to `STAGED`.
-  8. Lesson videos only. QR images (Cloudinary) and profile images are out of scope and listed under outstanding issues.
-- **Dependencies:** P00, P06. An external scheduler must call the new internal route; there is no `vercel.json` in the repository.
-- **Compatibility and migration:** additive table. Objects uploaded before this phase have no row and are never swept. Rollback: stop calling the sweeper; inline deletes can be restored by revert.
-- **Acceptance criteria:**
-  - Attach racing a sweep claim: exactly one wins; an attached object is never deleted.
-  - A storage deletion failure is retried on the next run and the row shows the attempt count.
-  - A replaced video is deleted by the sweeper, not inline.
-  - Replacing or removing the video on one lesson never claims an object that another lesson references.
-  - Deleting a course releases its lesson videos through the same claim.
-  - A save retry after an unknown outcome attaches the same object without error.
-- **Testing:** L1 for state transitions with an injected storage client. L2: attach versus claim race. L4 is not needed; storage calls are injected.
-- **Regression risks:** upload authorization response shape; lesson update with unchanged video (`src/app/api/creator/lessons/route.ts:507-511` must still skip cleanup); playback signing.
-- **Decision blockers:** none. Proposed sweep age: 24 hours.
 
 ### P15 — Admin audit trail and decision metadata
 
@@ -302,115 +186,6 @@ These rows retain review identifiers and proposed phase mappings. The mapped pha
 - **Regression risks:** course progress display; P09 settlement must skip lessons with a pending claim.
 - **Decision blockers:** D-06 (who reviews legacy claims; proposed: superadmin).
 
-### P21 — Atomic Q&A daily capacity
-
-- **Priority and complexity:** P2, S.
-- **Problem and evidence:** The route counts today's questions, compares to the limit, then creates, with no transaction (`src/app/api/questions/route.ts:371-393`). The day window is the server's local day (`:5-13`).
-- **Desired outcome:** Concurrent submissions cannot exceed the limit. The window is a UTC day.
-- **Scope:** `src/app/api/questions/route.ts`.
-- **Implementation requirements:** run the count and create in one `Serializable` transaction with up to three retries on `P2034`; return the existing 429 when the limit is reached; compute the window in UTC; keep the `|| 1` default.
-- **Dependencies:** P00.
-- **Compatibility and migration:** none. Around deployment a user could gain or lose a few hours of window once because of the UTC change.
-- **Acceptance criteria:** ten concurrent submissions with a limit of 1 create exactly one question; the others receive 429.
-- **Testing:** L2 for the race; L1 for the window calculation.
-- **Regression risks:** `remainingToday` in the GET response must use the same window.
-- **Decision blockers:** none.
-
-### P24 — Pending-approval status
-
-- **Priority and complexity:** P3, S.
-- **Problem and evidence:** `src/app/approval-pending/page.tsx` renders static text and a sign-out button. The redirect comes from `src/app/(withSidebar)/layout.tsx:26-34` using `src/lib/approval-gating.ts:3-25`. Some pending applicants are refused at sign-in instead (`src/lib/auth/credential-login.ts:95-101`) and never reach this page.
-- **Desired outcome:** A signed-in applicant sees their current application status, submission date, any applicant-facing reason, and the next action. A Refresh button re-checks.
-- **Scope:** new `GET /api/me/application-status`; the page.
-- **Implementation requirements:** authenticated only; returns the caller's own latest creator and brand requests with `status`, `createdAt` and `reason`. Never `internalNote` (P15). On APPROVED, prompt to continue to the dashboard. On REJECTED, show the reason and the support contact. Do not add any unauthenticated status lookup.
-- **Dependencies:** none. Reads better after P15.
-- **Compatibility and migration:** none.
-- **Acceptance criteria:** status changes appear after Refresh without signing out; the response contains no other user's data and no internal note.
-- **Testing:** L1.
-- **Regression risks:** the layout redirect loop conditions.
-- **Decision blockers:** none.
-
-### P27 — Campaign experiences: attached versus discovery
-
-- **Priority and complexity:** P2, S.
-- **Problem and evidence:** One query returns "active or already attached", ordered by `updatedAt`, limited to 50 (`src/app/api/brand/campaigns/[id]/attach-experience/route.ts:74-93`). An attached experience can fall outside the limit.
-- **Desired outcome:** Attached experiences always display in full. Discovery of other experiences is a separate, paginated, searchable list. The creator's name is shown.
-- **Scope:** the route's GET; `src/app/(withSidebar)/dashboard/brand/campaigns/[id]/experiences/page.tsx`.
-- **Implementation requirements:** return `attached[]` (all rows for the campaign with status and creator display name) and `discover` (published, not attached, cursor paginated, searchable). Attachment stays immediate and still rejects drafts (`:171-175`). Do not rename sponsorship fields. Do not add approval, invitation or email steps.
-- **Dependencies:** P03 (so a draft shown as attached is known to be hidden from visitors; show a "hidden until republished" badge).
-- **Compatibility and migration:** additive response fields; keep the old `experiences` array until the page is switched.
-- **Acceptance criteria:** with 60 attached experiences all 60 display; discovery pages beyond 50.
-- **Testing:** L1.
-- **Regression risks:** `tests/campaign-product-curation.test.ts` and sort-order handling.
-- **Decision blockers:** none.
-
-### P29 — Rewards workspace completeness
-
-- **Priority and complexity:** P2, L. Several caps and a provider-switching rule in one workspace. Split into two commits if review size requires: (a) provider stability and claims, (b) catalog selection.
-- **Problem and evidence:** The page defaults to Shopify and switches to Commerce7 only when Shopify is not usable, hiding the Shopify workspace and its history (`src/app/(withSidebar)/dashboard/brand/rewards/page.tsx:1131-1136`). Commerce7 claims and offers are limited to the newest 100 with no pagination or status filter (`src/app/api/brand/rewards/commerce7/route.ts:18-19`). The Commerce7 catalog is limited to 500 by title and drives product pickers and the `securityUnknownCount` diagnostic (`:20,27-33`); offer product titles fall back to raw ids outside that window (`src/components/rewards/commerce7-brand-rewards.tsx:217`). The customer's Shopify redemption list is unbounded (`src/app/api/rewards/shopify/redemptions/route.ts:15-37`). The provider selector renders outside the shared shell (`src/app/(withSidebar)/dashboard/brand/rewards/page.tsx:1136`).
-- **Desired outcome:** Each provider's rewards workspace stays reachable whenever that provider has a connection or history, with a repair action when disconnected. Claims paginate, filter by status, and surface unresolved work first. Product selection pages through the full canonical catalog. Diagnostics are computed over all products.
-- **Scope:** the rewards page; `src/app/api/brand/rewards/commerce7/route.ts` (split into offers, claims and catalog endpoints or add parameters); `src/components/rewards/commerce7-brand-rewards.tsx`; `src/app/api/rewards/shopify/redemptions/route.ts` and its client.
-- **Implementation requirements:**
-  1. Before changing any picker, read the claim routes and confirm in the phase notes that claim-time eligibility is enforced server-side independent of the picker list (U-26).
-  2. Provider tabs: show a provider when it has any connection, offer or claim. Selection is explicit, kept in the URL, and never switches automatically. A disconnected provider shows its history read-only and a reconnect action.
-  3. Claims: cursor pagination, status filter, default order that lists claims needing action first.
-  4. Catalog picker: paginated and searchable over `ConnectedCommerceProduct`. Resolve titles for products referenced by existing offers with a direct lookup by id.
-  5. Compute `securityUnknownCount` with a database count, not from the limited list.
-  6. Bound and paginate the customer redemption list.
-  7. Render the provider selector inside `BrandPageShell`.
-- **Dependencies:** P28 (connection states).
-- **Compatibility and migration:** no schema change. Keep the existing response keys until the client is switched.
-- **Acceptance criteria:** with Shopify disconnected and Commerce7 connected, the Shopify tab still shows past offers and redemptions; the 101st claim is reachable; a product beyond position 500 can be selected and its title displays on its offer; diagnostics match a direct count.
-- **Testing:** L1 with fixtures above each cap. L3: provider outage walk-through. L4 is not required; no provider calls change.
-- **Regression risks:** Commerce7 exclusive-access logic and edit-safety counts in the same route (`:21-24`); reward claim and reconciliation state machines must not be touched.
-- **Decision blockers:** none.
-
-### P30 — Admin display completeness
-
-- **Priority and complexity:** P3, S.
-- **Problem and evidence:** Admin brands returns only the Shopify domain (`src/app/api/admin/brands/route.ts:60-68`; `src/app/(withSidebar)/dashboard/admin/brands/page.tsx:88-104`). User lists show three memberships with no total (`take: 3` at `src/app/api/admin/users/route.ts:60` and two sibling routes).
-- **Desired outcome:** Admin brands shows every canonical connection with provider and status. User rows show the membership total and can expand to the full list.
-- **Scope:** the admin brands route and page; the three user routes; the user-management page.
-- **Implementation requirements:** add `connections[]` (provider, status, external account label) from the canonical connection service for all providers; keep `shopifyShopDomain` until the page is switched. Add `_count` of memberships and a details endpoint or expanded query for one user.
-- **Dependencies:** none.
-- **Compatibility and migration:** additive fields.
-- **Acceptance criteria:** a brand with Commerce7 only shows as connected; a user with seven memberships shows "7" and all seven on expand.
-- **Testing:** L1.
-- **Regression risks:** batched connection query performance for the brand list.
-- **Decision blockers:** none.
-
-### P31 — Shared confirmation and unsaved-work behavior
-
-- **Priority and complexity:** P3, M.
-- **Problem and evidence:** Destructive actions use native `confirm` at five page sites (`src/app/(withSidebar)/dashboard/creator/experiences/[id]/courses/page.tsx:136`, `src/app/(withSidebar)/dashboard/creator/courses/[id]/lessons/page.tsx:319`, `src/app/(withSidebar)/dashboard/brand/commerce/BrandCommerceClient.tsx:322`, `src/app/(withSidebar)/dashboard/brand/qr-batches/page.tsx:201,228`) while an `AlertDialog` component exists. No page warns before discarding edits; the brand selector reloads immediately (`src/components/brand/brand-selector.tsx:58`).
-- **Desired outcome:** One confirmation dialog pattern that states the real consequence. Forms with unsaved edits warn before navigation, reload or brand switch. Operations that partly succeed say which parts did.
-- **Scope:** a shared `ConfirmDestructive` component and `useUnsavedChanges` hook under `src/components`; the five sites; campaign form, lesson editor, post editor and reward offer forms; the brand selector.
-- **Implementation requirements:**
-  1. Replace the five native confirms. Each dialog names the object and the consequence that is true after P01 and P02 (for example "Codes with history cannot be deleted; archive instead").
-  2. Audit every other destructive button in dashboard pages for a missing confirmation and list the results in the commit message.
-  3. `useUnsavedChanges` registers dirty state, handles `beforeunload`, and exposes it to `BrandPageShell` so the selector asks before switching.
-  4. A small partial-result component for multi-step saves, used first in the experience form (details saved, cover failed).
-- **Dependencies:** P07 (shell context).
-- **Compatibility and migration:** none.
-- **Acceptance criteria:** no `window.confirm` remains in dashboard pages; switching brand with a dirty form asks first; dialogs are keyboard operable and return focus to the trigger.
-- **Testing:** L1 component tests. L3: keyboard pass on each dialog.
-- **Regression risks:** the embedded script in `src/app/shopify/route.ts:571` is not a dashboard page and stays as is.
-- **Decision blockers:** none.
-
-### P32 — URL-persisted filters and superseded-request handling
-
-- **Priority and complexity:** P3, M.
-- **Problem and evidence:** Filters live in component state on almost every list and analytics page; only `src/app/(withSidebar)/dashboard/creator/qa/page.tsx:47-49` reads a filter from the URL. Search is debounced on product pages only (`src/app/(withSidebar)/dashboard/brand/products/BrandProductsClient.tsx:411`; `src/app/(withSidebar)/dashboard/brand/campaigns/[id]/products/page.tsx:125`).
-- **Desired outcome:** Applicable filters survive refresh, back navigation and sharing within the team. Searches are debounced and stale results are ignored.
-- **Scope:** a `useUrlFilters` hook; brand analytics, creator analytics, QR inventory, rewards claims, commerce orders; the request-guard hook from P25.
-- **Implementation requirements:** store only non-sensitive values (dates, status, own entity ids, search text). Never tokens, emails or customer identifiers. Use `router.replace` so typing does not flood history. Debounce at about 300 ms. Add a test asserting that dashboard paths remain untracked by `src/lib/analytics-policy.ts`, so URL parameters never reach third parties.
-- **Dependencies:** P25, P26.
-- **Compatibility and migration:** existing URLs without parameters behave as today.
-- **Acceptance criteria:** refresh keeps filters; back restores the previous filter set; a fast typist triggers one request per pause.
-- **Testing:** L1 for the hook. L3: refresh and back checks.
-- **Regression risks:** OAuth result flags read from the URL on the Shopify page (`src/app/(withSidebar)/dashboard/brand/shopify/BrandShopifyClient.tsx:71-123`).
-- **Decision blockers:** none.
-
 ### P33 — Campaign workspace and readiness
 
 - **Priority and complexity:** P3, L. New contextual structure over existing screens. Review after the layout lands, before readiness rules.
@@ -441,60 +216,6 @@ These rows retain review identifiers and proposed phase mappings. The mapped pha
 - **Acceptance criteria:** from any experience page the creator reaches its Q&A and analytics already filtered; a draft shows "Draft" and remains editable in authenticated management; its public viewer returns 404.
 - **Testing:** L1 for overview counts. L3.
 - **Regression risks:** creator layout role guard.
-- **Decision blockers:** none.
-
-### P35 — Dashboard shell behavior
-
-- **Priority and complexity:** P3, S.
-- **Problem and evidence:** Sidebar items are plain anchors, forcing full page loads (`src/components/app-sidebar.tsx:88-89`). No `loading.tsx` or `error.tsx` exists under `src/app`. Middleware sets `x-pathname` on the response (`src/middleware.ts:65-67`), so the brand layout that reads it from request headers always gets an empty string (`src/app/(withSidebar)/dashboard/brand/layout.tsx:21`).
-- **Desired outcome:** Sidebar navigation is client-side. Dashboard segments have a loading state and an error boundary with retry. The brand layout receives the pathname.
-- **Scope:** `src/components/app-sidebar.tsx`; `loading.tsx` and `error.tsx` at `(withSidebar)/dashboard`; `src/middleware.ts`.
-- **Implementation requirements:** use `next/link` inside `SidebarMenuButton asChild`, preserving `aria-current`. Place boundaries at the segment root only, so in-page panel states are not replaced. Forward the pathname with `NextResponse.next({ request: { headers } })`.
-- **Dependencies:** none.
-- **Compatibility and migration:** none.
-- **Acceptance criteria:** sidebar clicks do not reload the document; a thrown render error shows the boundary with a retry; the Shopify-install access-denied message appears on the intended route.
-- **Testing:** L1 for middleware header forwarding. L3 for navigation.
-- **Regression risks:** middleware matcher and auth redirects; webhook early return (`src/middleware.ts:25-27`).
-- **Decision blockers:** none.
-
-### P37 — Immutable completion time
-
-- **Priority and complexity:** P2, M.
-- **Problem and evidence:** `LessonProgress` has `isCompleted` and `updatedAt` only (`prisma/schema.prisma:313-320`). Any later progress save moves `updatedAt`, so period completion counts drift. Owner activity is counted with learners.
-- **Desired outcome:** Completion in a period is counted from a timestamp written once. Historical completions with no recorded time are reported as such. Owner rows are excluded from learner reports.
-- **Scope:** migration adding `LessonProgress.completedAt DateTime?`; `src/app/api/progress/lesson/route.ts`; `src/lib/anonymous-transfer.ts`; creator and brand analytics routes; `src/app/api/me/dashboard-summary/route.ts`.
-- **Implementation requirements:**
-  1. Set `completedAt` to now only in the write that changes `isCompleted` from false to true. Never update it afterward.
-  2. Transfer keeps the earliest non-null `completedAt` of the two rows. If both are null, leave null.
-  3. No backfill. Existing completed rows keep null.
-  4. Reports show "completed in period" from `completedAt`, plus "completion date not recorded: N" for completed rows with null, and "currently complete" as a separate current-state figure.
-  5. Exclude rows whose user is the experience's creator from all learner counts.
-  6. Where P16 to P18 are shipped, add "qualified in period" from `LessonQualification.qualifiedAt` as a separate figure.
-- **Dependencies:** P03 (owner rule), P36 (labels).
-- **Compatibility and migration:** additive nullable column. Readers tolerate null from the first deploy.
-- **Acceptance criteria:** re-saving progress on a completed lesson does not change `completedAt`; a lesson completed last month and re-watched today counts in last month only; historical rows appear in the "not recorded" figure.
-- **Testing:** L1; L2 for the set-once write under concurrent saves.
-- **Regression risks:** course completion award logic reads `isCompleted` and must not change.
-- **Decision blockers:** none.
-
-### P39 — Scope, attribution and drilldown consistency
-
-- **Priority and complexity:** P3, M.
-- **Problem and evidence:** Brand engagement accepts a campaign filter (`src/app/api/brand/analytics/route.ts:35,43`); commerce and conversions panels do not, yet they sit on one page. Entry-campaign and product-campaign breakdowns exist separately in the response (`src/lib/commerce/order-analytics.ts:268-269`) and need matching labels. The product breakdown counts orders containing a product (`:273-280`). Drilldown links carry no period (`src/app/(withSidebar)/dashboard/brand/analytics/page.tsx:777,786`).
-- **Desired outcome:** Each panel states its scope. A filter that a panel does not apply is shown as not applied rather than implied. Drilldowns open the destination with the same supported scope.
-- **Scope:** a shared `ReportMeta` type in `src/lib`; analytics routes; analytics pages; the orders explorer query parameters.
-- **Implementation requirements:**
-  1. `ReportMeta { period: { start, end, timezone }, dateBasis, scope, appliedFilters, unsupportedFilters, includedStatuses, generatedAt, coverage }` returned by every analytics route.
-  2. Panels render a one-line scope caption from it. When a campaign filter is set, panels that cannot apply it say "Not filtered by campaign: shows the whole brand."
-  3. Label the two campaign breakdowns "By entry campaign (how the visitor arrived)" and "By product campaign (which campaign promoted the product)".
-  4. Label the product breakdown "Orders containing this product. An order with several products is counted once for each, so rows do not add up to total orders." Read the current label first and record it (A-15 was not verified).
-  5. Drilldown links pass period, basis and attribution filter. Check whether the orders explorer accepts a date range; if it does not, add one that matches its existing `createdAt` keyset ordering and say so in the caption.
-  6. Add the sentence "Attributed orders followed a tracked SQRATCH link. Attribution does not show that SQRATCH caused the sale and is not a commission statement."
-- **Dependencies:** P36, P38.
-- **Compatibility and migration:** additive response metadata.
-- **Acceptance criteria:** every panel shows period, timezone and basis; a campaign filter never silently appears to apply to a whole-brand panel; following a drilldown shows the same period.
-- **Testing:** L1.
-- **Regression risks:** order explorer pagination (`src/lib/commerce/order-list.ts`).
 - **Decision blockers:** none.
 
 ### P40 — Operations visibility
@@ -553,65 +274,22 @@ These rows retain review identifiers and proposed phase mappings. The mapped pha
 - **Regression risks:** middleware matcher paths (`src/middleware.ts:71-80`); Shopify embedded entry (`/shopify`).
 - **Decision blockers:** owner sign-off on the final menu after using P33 and P34.
 
-### P44 — Deployment-wide rate limiting and login throttling
-
-- **Priority and complexity:** P2, M. Not in Astra's delivery stages but required by its operations list, and credential sign-in has no throttle today.
-- **Problem and evidence:** The limiter is a module-level `Map`, so limits apply per server instance (`src/lib/rate-limit.ts:18`). Credential sign-in calls no limiter (`src/app/api/auth/[...nextauth]/options.ts:30-40`; `src/lib/auth/credential-login.ts:62-116`).
-- **Desired outcome:** Limits are enforced across instances for sign-up, verification resend, scan, waitlist, OAuth start, password recovery and sign-in. Sign-in is throttled per account and per address with a generic message.
-- **Scope:** `src/lib/rate-limit.ts` behind its current interface; the sign-in authorize path; `docs/env-vars.md`.
-- **Implementation requirements:** keep the call-site API. Add a shared-store implementation selected by configuration, with the in-memory limiter as fallback when the store is unreachable. Sign-in throttling must not reveal whether an account exists and must keep the existing dummy-hash timing protection.
-- **Dependencies:** none. Needs a store chosen and provisioned by the owner.
-- **Compatibility and migration:** new environment variables. If Postgres is chosen as the store, an additive table.
-- **Acceptance criteria:** two simulated instances share one counter; repeated failed sign-ins are slowed and then refused with the same message as a wrong password.
-- **Testing:** L1 with an injected store. L2 only if the Postgres option is chosen.
-- **Regression risks:** scan throughput at events; the analytics collection endpoint's limits.
-- **Decision blockers:** D-15 (which shared store).
-
-### P45 — Session check efficiency
-
-- **Priority and complexity:** P3, S. Conditional on measurement.
-- **Problem and evidence:** The JWT callback reads the user row on every invocation (`src/app/api/auth/[...nextauth]/options.ts:105-128`). Many handlers resolve the session more than once per request, for example `resolveSession()` followed by `resolveBrandAdminContext()` (`src/app/api/brand/qr-batches/[id]/route.ts:33,39`). `roleCheckedAt` is written and never read.
-- **Desired outcome:** One session resolution per request. Revocation latency is unchanged because every request still performs the check once.
-- **Scope:** `src/lib/auth-session.ts`; `src/lib/brand-auth.ts`.
-- **Implementation requirements:** memoize session resolution for the lifetime of a single request only (React `cache` or an equivalent request-scoped store). Do not cache across requests. Do not use `roleCheckedAt` to skip the check. Remove `roleCheckedAt` only if nothing reads it.
-- **Dependencies:** none.
-- **Compatibility and migration:** none.
-- **Acceptance criteria:** a brand mutation performs one user read for session validation; a deactivated user is still rejected on their next request.
-- **Testing:** L1 counting resolver invocations.
-- **Regression risks:** test injection through `AuthResolvers` must keep working.
-- **Decision blockers:** none.
-
-### P46 — Dev-dependency advisory cleanup
-
-- **Priority and complexity:** P3, S. No production exposure: `npm audit --omit=dev` is clean.
-- **Problem and evidence:** `xlsx@^0.18.5` has two high-severity advisories with no fix on the registry (`package.json:77`) and is imported only by `scripts/import-legacy-printed-stickers.ts`. Six moderate advisories sit under `@typescript-eslint/*` and `minimatch`. `eslint-config-next` is pinned at 15.3.4 while `next` is on 15.5.x (`package.json:43,70`).
-- **Desired outcome:** A clean full audit, or one documented exception that cannot reach production.
-- **Scope:** `package.json`, lockfile, the one script.
-- **Implementation requirements:** replace `xlsx` in the script with a maintained reader, or move the script and its dependency out of the application package. Align `eslint-config-next` with the installed `next` minor and apply the available fixes. Do not combine with any application change.
-- **Dependencies:** none.
-- **Compatibility and migration:** lint rule changes may surface new warnings; fix or record them in the same commit.
-- **Acceptance criteria:** `npm audit` reports no high-severity findings; lint, typecheck and tests pass.
-- **Testing:** L1 full suite.
-- **Regression risks:** lint configuration drift.
-- **Decision blockers:** none.
-
 ---
 
 
 ## 4. Remaining decisions and migration prerequisites
 
 
-Each has a proposed default. Phases proceed on the default unless you say otherwise.
+Each has a proposed default. Phases proceed on the default unless you say otherwise. D-03 (an existing anonymous unlock still converts after a stop) was adopted in P12.
 
 | ID | Decision | Proposed default | Consequence of the alternative | Blocks |
 |---|---|---|---|---|
-| D-03 | After redemptions are stopped, does an anonymous unlock that already exists still convert on sign-in? | Yes | No means people who scanned before the stop lose access when they sign in | P12 |
-| D-04 | Should `Campaign.isActive` or `Brand.isActive` block scans or public campaign pages? | Not in this plan. Decide after seeing the row counts | Enforcing now could invalidate printed codes for campaigns marked inactive for unrelated reasons | P12 |
+| D-04 | Should `Campaign.isActive` or `Brand.isActive` block scans or public campaign pages? | Not in this plan. Decide after the read-only count of `isActive = false` rows | Enforcing now could invalidate printed codes for campaigns marked inactive for unrelated reasons | none |
 | D-05 | Checkpoint format and limits | One multiple-choice question per lesson, answer held server-side, sign-in required to submit, 3 attempts per 10 minutes | Free-text or multi-question checkpoints need a larger authoring tool; allowing anonymous submission needs qualification transfer in P09 | P16, P18 |
 | D-06 | How do rewarded legacy lessons transition, and who reviews unsettled legacy claims? | Creators switch per lesson, one-way. Legacy lessons keep awarding until switched. Superadmin reviews claims | A forced cutoff date would stop legacy awards for creators who have not authored a checkpoint | P17, P19 |
 | D-10 | When does the expected-brand header become mandatory? | One release after P07 | Immediate enforcement breaks tabs opened before deploy | P07 |
 | D-13 | Applicant-facing reason versus internal note | Existing `reason` is applicant-facing; add `internalNote` | Treating existing reasons as internal would hide past explanations from applicants | P15 |
-| D-15 | Shared rate-limit store | A managed key-value store, with in-memory fallback | A Postgres table avoids a new service and adds write load on hot paths | P44 |
+| D-15 | Shared rate-limit store | Implemented as an opt-in PostgreSQL table (`RATE_LIMIT_STORE=postgres`) for sign-in and recovery endpoints; a managed key-value store remains possible if scan limits must be deployment-wide | A managed store adds a service; Postgres adds write load, which is why hot paths stay in memory | none |
 | D-16 | Is there a budget or cap on creator-configured rewards, given that points are redeemed against brand offers? | Not decided here. Flagged because checkpoints do not address it | Without one, a creator and a second account can still mint up to 1000 points per lesson | none; new product work |
 
 ---
@@ -621,9 +299,9 @@ Each has a proposed default. Phases proceed on the default unless you say otherw
 
 These are run by the owner, not by an agent.
 
-1. `npx prisma migrate status` against production, then `prisma migrate diff` as described in `docs/prisma-migrations.md`. That document verifies production only through `20260719061157`; ten later migration folders exist.
+1. `npx prisma migrate status` against production, then `prisma migrate diff` as described in `docs/prisma-migrations.md`.
 2. Run the read-only drift query from P01 once, and keep the result.
-3. Run the read-only count from P12 item 9 for `isActive = false` rows.
+3. Run the read-only count of `QRCode`, `QRCodeBatch` and `Campaign` rows with `isActive = false` (informs D-04), and the shared-storage-path check in `docs/lesson-video-uploads.md` before scheduling the asset sweeper.
 
 ### E.2 Migration inventory
 
@@ -631,40 +309,36 @@ All are additive and nullable or defaulted. None has a backfill.
 
 | Phase | Change | Preflight | Dual-format period |
 |---|---|---|---|
-| P12 | `QRCode.redemptionStoppedAt`; `QRCodeBatch.redemptionStoppedAt`, `redemptionStoppedById` | count of `isActive = false` rows for information | Null means redeemable; scan page and API ship together |
-| P13 | `StagedAsset` table | none | Uploads authorized before deploy have no row; attach falls back and inserts one |
+| P12 *(branch)* | `QRCode.redemptionStoppedAt`; `QRCodeBatch.redemptionStoppedAt`, `redemptionStoppedById` | count of `isActive = false` rows for information | Null means redeemable; scan page and API ship together |
+| P13 *(branch)* | `StagedAsset` table | none | Uploads authorized before deploy have no row; attach adopts one |
+| P37 *(branch)* | `LessonProgress.completedAt` | none | Null reported as "date not recorded" |
+| P44 *(branch)* | `RateLimitCounter` table, used only with `RATE_LIMIT_STORE=postgres` | none | In-memory fallback; safe to apply before or after the release |
 | P15 | `AdminAuditEvent`; `reviewedAt`, `internalNote` on both request models | none | Null `reviewedAt` shown as not recorded |
 | P16 | Policy enum and column; checkpoint, qualification and attempt tables | none | Default policy is legacy for every lesson |
 | P19 | Requirement version, course qualification and legacy claim tables | none | Versions start at deployment; none invented for the past |
-| P37 | `LessonProgress.completedAt` | none | Null reported as "date not recorded" |
-| P44 | Only if Postgres is chosen as the rate-limit store | none | In-memory fallback |
 
 Rules for every migration: one folder per phase; enum additions are not reversible, so P16's enum is reviewed with extra care; index creation on large tables is called out for a low-traffic window; rollback is "stop reading and writing the new column", never a destructive down migration.
 
 ### E.3 Sequencing constraints
 
-- **P06 before P13.** After P06, uploads with unknown outcomes are kept and accumulate until P13's sweeper exists. Storage growth is the accepted cost of not losing media.
 - **P16 to P19 in order.** P16 changes nothing visible. P18 is the first phase that changes how a reward is earned, and only for lessons a creator has switched.
 - **P04 and P05 before P15.** Audit rows are written inside the transactions those phases create.
-- **P03 before P23, P27 and P37.** They rely on the publication and owner rules.
-- **P07 before P31.** The dirty-form guard uses the shell context P07 introduces.
 
 ### E.4 Rollout transitions that support old and new behavior together
 
 | Phase | Old clients or data | New behavior | When to close the transition |
 |---|---|---|---|
 | P07 | Tabs loaded before deploy send no expected-brand header | Enforced only when present | One release later, require the header on brand mutations |
-| P12 | Scan page treating any non-OK as invalid | New 409 code with message | Same release |
-| P13 | Objects without a staged row | Fallback insert at attach | Remove fallback after one release |
+| P13 *(branch)* | Objects without a staged row | Adopted at attach | Remove the adoption fallback after one release |
+| P12 *(branch)* | Scan page treating any non-OK as invalid | New 409 `QR_REDEMPTION_STOPPED` with message | Same release |
 | P16 | Lessons with rewards under self-reported completion | Policy column, default legacy | Per lesson, when its creator switches |
-| P36 | Consumers of `gross*` and `net*` fields | New names alongside | Remove old names after one release |
 
 ### E.5 Rollback notes
 
-- Code-only phases (P21, P24, P27 to P35, P39 to P43, P45) roll back by revert. P02 deletes route files; revert restores them.
+- Code-only phases (P21, P24, P27 to P35, P39 to P43) roll back by revert. P02 deletes route files; revert restores them.
 - P01 and P02 must not be reverted independently of each other once shipped, or the legacy routes return without the guard.
 - Migration phases roll back by reverting code and leaving columns in place.
-- P12 is the one phase where a rollback changes user-visible state: codes stopped while it was live become redeemable again if the predicate is removed. Resume them deliberately before reverting, or keep the predicate.
+- P12 is the one phase where a rollback changes user-visible state (this round): codes stopped while it was live become redeemable again if the predicate is removed. Resume them deliberately before reverting, or keep the predicate.
 - P18 rollback returns transitioned lessons to no-award-on-flag only if the policy column is still honored. Do not revert P16 while any lesson is on the checkpoint policy.
 
 ---

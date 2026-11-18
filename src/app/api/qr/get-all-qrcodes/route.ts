@@ -1,3 +1,4 @@
+import { qrDisplayStatus } from "@/lib/qr-display-status";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { AuthResolvers, realAuthResolvers } from "@/lib/auth-session";
@@ -60,6 +61,7 @@ export async function getAllQrCodesImpl(
         },
         qrCodeData: true,
         status: true,
+        redemptionStoppedAt: true,
         usedAt: true,
         createdAt: true,
         qrCodeUrl: true,
@@ -78,7 +80,7 @@ export async function getAllQrCodesImpl(
     campaignId: q.campaignId,
     campaignName: q.campaign?.name || "Unknown",
     code: q.qrCodeData,
-    status: q.status === "USED" ? "REDEEMED" : "NEW",
+    status: qrDisplayStatus(q),
     usedBy: q.redeemedBy?.email || null,
     usedAt: q.usedAt || null,
     createdAt: q.createdAt,

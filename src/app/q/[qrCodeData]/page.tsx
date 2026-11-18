@@ -11,6 +11,7 @@ export default function QRLandingPage() {
   const qrCodeData = params.qrCodeData as string;
 
   const [error, setError] = useState<string | null>(null);
+  const [stopped, setStopped] = useState(false);
 
   useEffect(() => {
     const run = async () => {
@@ -33,6 +34,7 @@ export default function QRLandingPage() {
         const data = await res.json();
 
         if (!res.ok) {
+          if (data?.code === "QR_REDEMPTION_STOPPED") setStopped(true);
           throw new Error(data?.error || "Invalid QR code.");
         }
 
@@ -80,12 +82,14 @@ export default function QRLandingPage() {
                 drop-shadow-[0_0_12px_rgba(236,236,236,0.50)]
               "
             >
-              {error ? "Invalid QR" : "Unlocking..."}
+              {error ? (stopped ? "Code unavailable" : "Invalid QR") : "Unlocking..."}
             </h1>
 
             <p className="mt-3 text-[16px] sm:text-[18px] leading-[160%] text-copy-75">
               {error
-                ? "This QR code could not be used."
+                ? stopped
+                  ? "This code can't unlock anything right now."
+                  : "This QR code could not be used."
                 : "Please wait while we load your campaign."}
             </p>
           </div>

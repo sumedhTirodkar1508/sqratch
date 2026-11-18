@@ -1,3 +1,4 @@
+import { qrDisplayStatus } from "@/lib/qr-display-status";
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { AuthResolvers, realAuthResolvers } from "@/lib/auth-session";
@@ -91,6 +92,7 @@ export async function exportBatchImpl(
         qrCodeData: true,
         qrCodeUrl: true,
         status: true,
+        redemptionStoppedAt: true,
       },
     });
 
@@ -108,7 +110,7 @@ export async function exportBatchImpl(
       return [
         sanitizeForCsv(qr.qrCodeData),
         sanitizeForCsv(qr.qrCodeUrl || ""),
-        sanitizeForCsv(qr.status === "USED" ? "REDEEMED" : "NEW"),
+        sanitizeForCsv(qrDisplayStatus(qr)),
         sanitizeForCsv(scanUrl),
       ];
     });

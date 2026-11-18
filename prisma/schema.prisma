@@ -38,6 +38,7 @@ model User {
   qrCodesCreated            QRCode[]                   @relation("QRCodeCreatedByUser")
   qrRedemptions             QRCode[]                   @relation("QRCodeRedeemedByUser")
   archivedQrBatches         QRCodeBatch[]              @relation("QRCodeBatchArchivedBy")
+  stoppedQrBatches          QRCodeBatch[]              @relation("QRCodeBatchRedemptionStoppedBy")
   questions                 Question[]
   questionAnswers           QuestionAnswer[]
   commerceRewardRedemptions CommerceRewardRedemption[]
@@ -175,9 +176,14 @@ model QRCodeBatch {
   /// deliberately separate from `isActive` and from any redemption stop.
   archivedAt    DateTime?
   archivedById  String?
+  /// Stops NEW redemptions of this batch's codes. Distinct from archiving (list
+  /// visibility) and deletion (only for unused codes). Never rewrites history.
+  redemptionStoppedAt   DateTime?
+  redemptionStoppedById String?
   qrCodes       QRCode[]
   campaign      Campaign? @relation(fields: [campaignId], references: [id])
   archivedBy    User?     @relation("QRCodeBatchArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  redemptionStoppedBy User? @relation("QRCodeBatchRedemptionStoppedBy", fields: [redemptionStoppedById], references: [id], onDelete: SetNull)
 
   @@index([campaignId])
 }
@@ -196,6 +202,9 @@ model QRCode {
   createdById               String
   isActive                  Boolean                    @default(true)
   batchId                   String?
+  /// While set on a NEW code, no new unlock or point may come from it. USED codes
+  /// and existing unlocks are never changed by a stop.
+  redemptionStoppedAt       DateTime?
   analyticsEvents           AnalyticsEvent[]
   unlocks                   CampaignUnlock[]
   pointTransactions         PointTransaction[]
@@ -1794,3 +1803,5 @@ enum RewardProvisioningState {
   FAILED_FINAL
   REVOKED
 }
+
+

@@ -67,6 +67,48 @@ export async function scanImpl(request: NextRequest, deps: AuthResolvers) {
     const brandId = qr.campaign.brandId || null;
     const isRedeemed = qr.status === "USED";
 
+    // A stopped code must not touch the visitor's session attribution (campaign and
+    // QR on `UserSession` feed later click attribution), so it is decided first.
+    if (!isRedeemed && qr.redemptionStoppedAt) {
+      // NEW but stopped (USED codes returned above). The row lock taken at the top
+      // orders this read after any concurrent stop or redemption. A viewer who
+      // already holds an unlock for this campaign is sent on; nobody else gets a
+      // new unlock, point or status change from this code.
+      // Either the account already has an unlock, or this browser still holds one that
+      // has not yet moved to the account (a sign-in transfer that needs a retry).
+      const holders = [
+        ...(userId ? [{ userId }] : []),
+        ...(sessionId ? [{ anonKey: sessionId, userId: null }] : []),
+      ];
+      const holdsUnlock = holders.length
+        ? await tx.campaignUnlock.findFirst({ where: { campaignId: qr.campaign.id, OR: holders }, select: { id: true } })
+        : null;
+      await tx.analyticsEvent.create({
+        data: {
+          name: "qr_scan_stopped",
+          brandId,
+          campaignId: qr.campaign.id,
+          qrCodeId: qr.id,
+          userId,
+          // No session row is written for a stopped scan, so none is referenced.
+          sessionId: null,
+          pagePath: `/q/${qrCodeData}`,
+          data: { batchId: qr.batchId, qrCodeData: qr.qrCodeData, holdsUnlock: Boolean(holdsUnlock) },
+        },
+      });
+      if (holdsUnlock) {
+        return NextResponse.json({ ok: true, campaignSlug: qr.campaign.slug || qr.campaign.id });
+      }
+      return NextResponse.json(
+        {
+          error: "This code is no longer accepting new redemptions. If you already unlocked this campaign, sign in to continue.",
+          code: "QR_REDEMPTION_STOPPED",
+          campaignSlug: qr.campaign.slug || qr.campaign.id,
+        },
+        { status: 409 },
+      );
+    }
+
     if (sessionId) {
       await tx.userSession.upsert({
         where: { id: sessionId },

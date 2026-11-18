@@ -193,6 +193,7 @@ async function moveUnlock(
         userId,
         userEmail,
         db: tx,
+        honorExistingAnonymousUnlock: true,
       });
       if (redemption.redeemed) {
         pointAwarded = await awardQrPointOnce(tx, userId, unlock.qrCodeId);
@@ -208,6 +209,7 @@ async function moveUnlock(
       userId,
       userEmail,
       db: tx,
+      honorExistingAnonymousUnlock: true,
     });
     if (!redemption.redeemed) {
       await tx.campaignUnlock.delete({ where: { id: unlockId } });

@@ -19,6 +19,7 @@ type CampaignStats = {
   campaignName: string;
   totalQRCodes: number;
   redeemedCount: number;
+  stoppedCount?: number;
 };
 
 type DashboardStats = {
@@ -136,6 +137,12 @@ function CampaignCard({
             <span className="text-copy-70">Redeemed:</span>{" "}
             <span className="font-medium text-copy-95">{c.redeemedCount}</span>
           </div>
+          {(c.stoppedCount ?? 0) > 0 ? (
+            <div>
+              <span className="text-copy-70">Stopped (not redeemable):</span>{" "}
+              <span className="font-medium text-copy-95">{c.stoppedCount}</span>
+            </div>
+          ) : null}
         </div>
       </div>
     </GradientStatCard>
@@ -280,6 +287,7 @@ export default function DashboardPage() {
         Campaign: c.campaignName,
         TotalQRCodes: c.totalQRCodes,
         Redeemed: c.redeemedCount,
+        Stopped: c.stoppedCount ?? 0,
       });
     });
 
@@ -289,6 +297,7 @@ export default function DashboardPage() {
         Campaign: c.campaignName,
         TotalQRCodes: c.totalQRCodes,
         Redeemed: c.redeemedCount,
+        Stopped: c.stoppedCount ?? 0,
       });
     });
 

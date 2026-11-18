@@ -56,7 +56,7 @@ export async function checkQrCodeImpl(
         qrCodeData: qrcodeID,
         campaignId: campaignId,
       },
-      select: { status: true },
+      select: { status: true, redemptionStoppedAt: true },
     });
 
     if (!qr) {
@@ -69,7 +69,11 @@ export async function checkQrCodeImpl(
       );
     }
 
-    return NextResponse.json({ status: qr.status }, { status: 200 });
+    // `status` keeps its stored value for existing callers; `redemptionStopped` says a NEW code cannot be redeemed now.
+    return NextResponse.json(
+      { status: qr.status, redemptionStopped: qr.status === "NEW" && qr.redemptionStoppedAt !== null },
+      { status: 200 },
+    );
   } catch {
     return NextResponse.json(
       { status: "INVALID", error: "Server error." },

@@ -5,6 +5,7 @@ import { use, useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { CreatorPageShell } from "@/components/creator/page-shell";
 import { fetchJson, getErrorMessage } from "@/components/experience/client-utils";
+import { ConfirmDestructive } from "@/components/confirm-destructive";
 import { PageCard } from "@/components/experience/experience-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -130,14 +131,6 @@ export default function CreatorExperienceCoursesPage({
 
   async function deleteCourse(courseId: string) {
     if (savingNew || savingId || deletingId) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      "Delete this course? This will also delete all lessons inside it. This cannot be undone.",
-    );
-
-    if (!confirmed) {
       return;
     }
 
@@ -430,15 +423,22 @@ function EditableCourseCard({
           )}
         </Button>
         <div className="mt-2 w-full border-t border-red-300/20 pt-4 sm:mt-0 sm:w-auto sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void onDelete(course.id)}
-            disabled={disabled}
-            className="rounded-full border-red-400/45 bg-red-500/10 text-red-700 dark:text-red-200 hover:border-red-300/70 hover:bg-red-500/20 hover:text-red-100"
-          >
-            {deleting ? "Deleting..." : "Delete course"}
-          </Button>
+          <ConfirmDestructive
+            title={`Delete course "${course.title}"?`}
+            description="This also deletes every lesson in this course and their uploaded videos. This cannot be undone."
+            confirmLabel="Delete course"
+            onConfirm={() => onDelete(course.id)}
+            trigger={
+              <Button
+                type="button"
+                variant="outline"
+                disabled={disabled}
+                className="rounded-full border-red-400/45 bg-red-500/10 text-red-700 dark:text-red-200 hover:border-red-300/70 hover:bg-red-500/20 hover:text-red-100"
+              >
+                {deleting ? "Deleting..." : "Delete course"}
+              </Button>
+            }
+          />
         </div>
       </div>
     </PageCard>

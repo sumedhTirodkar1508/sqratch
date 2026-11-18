@@ -8,6 +8,7 @@ import { useSearchParams } from "next/navigation";
 import { BrandPageShell } from "@/components/brand/page-shell";
 import { fetchJson, getErrorMessage } from "@/components/experience/client-utils";
 import { PageCard } from "@/components/experience/experience-shell";
+import { ConfirmDestructive } from "@/components/confirm-destructive";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { safeExternalProductUrl } from "@/lib/commerce/product-link-display";
@@ -331,15 +332,22 @@ export function BrandShopifyClient({
               </Button>
 
               {isConnected ? (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={() => void disconnectShopify()}
-                  disabled={disconnecting}
-                  className="rounded-full border border-red-500/40 bg-red-500 text-white hover:bg-red-500/90"
-                >
-                  {disconnecting ? "Disconnecting..." : "Disconnect Shopify"}
-                </Button>
+                <ConfirmDestructive
+                  title="Disconnect Shopify?"
+                  description="SQRATCH stops syncing products and receiving orders from this store, and the Shopify rewards stop working until you reinstall the app and reconnect. Existing products, orders, and analytics are kept."
+                  confirmLabel="Disconnect Shopify"
+                  onConfirm={disconnectShopify}
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      disabled={disconnecting}
+                      className="rounded-full border border-red-500/40 bg-red-500 text-white hover:bg-red-500/90"
+                    >
+                      {disconnecting ? "Disconnecting..." : "Disconnect Shopify"}
+                    </Button>
+                  }
+                />
               ) : null}
             </div>
 

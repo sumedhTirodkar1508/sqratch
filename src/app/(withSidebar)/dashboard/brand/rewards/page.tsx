@@ -1,10 +1,12 @@
 "use client";
 
+import { useDiscardGuard } from "@/hooks/use-discard-guard";
 import { useBrandFetch } from "@/components/brand/brand-fetch";
 
 import Image from "next/image";
-import { Commerce7BrandRewardsPanel, type Commerce7BrandRewardData } from "@/components/rewards/commerce7-brand-rewards";
-import { useEffect, useMemo, useState } from "react";
+import { Commerce7BrandRewardsPanel } from "@/components/rewards/commerce7-brand-rewards";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Gift, Package, Pencil, Power, RefreshCw } from "lucide-react";
 import { BrandPageShell } from "@/components/brand/page-shell";
 import { fetchJson, getErrorMessage } from "@/components/experience/client-utils";
@@ -13,6 +15,8 @@ import {
   formatRewardPercentage,
 } from "@/lib/reward-formatting";
 import { PageCard } from "@/components/experience/experience-shell";
+import { snapshotOf, useUnsavedChanges } from "@/hooks/use-unsaved-changes";
+import { ConfirmDestructive } from "@/components/confirm-destructive";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -232,7 +236,10 @@ function ShopifyBrandRewardsPanel() {
   const [offers, setOffers] = useState<RewardOffer[]>([]);
   const [products, setProducts] = useState<ShopifyProduct[]>([]);
   const [form, setForm] = useState<OfferFormState>(defaultForm);
+  // Last loaded/saved form values; the form is dirty when it differs from them.
+  const [savedForm, setSavedForm] = useState<OfferFormState>(defaultForm);
   const [editingOfferId, setEditingOfferId] = useState<string | null>(null);
+  const { guard, dialog: discardDialog } = useDiscardGuard();
   const [loading, setLoading] = useState(true);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -244,6 +251,7 @@ function ShopifyBrandRewardsPanel() {
     brand?.shopifyConnectionStatus === "CONNECTED" &&
     Boolean(brand.shopifyShopDomain) &&
     brand.hasShopifyAccessToken;
+  useUnsavedChanges(snapshotOf(form) !== snapshotOf(savedForm));
   const selectedProductSet = useMemo(
     () => new Set(form.selectedProductGids),
     [form.selectedProductGids],
@@ -296,6 +304,10 @@ function ShopifyBrandRewardsPanel() {
       if (status?.shopifyCurrencyCode) {
         const currencyCode = status.shopifyCurrencyCode;
         setForm((f) => ({
+          ...f,
+          currencyCode,
+        }));
+        setSavedForm((f) => ({
           ...f,
           currencyCode,
         }));
@@ -382,7 +394,7 @@ function ShopifyBrandRewardsPanel() {
     const needsProductReselection = offer.computedCompatibility.reasons.includes(
       "PRODUCT_RESELECTION_REQUIRED",
     );
-    setForm({
+    const nextForm: OfferFormState = {
       title: offer.title,
       description: offer.description || "",
       isActive: offer.isActive,
@@ -412,16 +424,20 @@ function ShopifyBrandRewardsPanel() {
         ? []
         : offer.products.map((product) => product.shopifyProductGid),
       currencyReviewAcknowledged: false,
-    });
+    };
+    setForm(nextForm);
+    setSavedForm(nextForm);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function resetForm() {
     setEditingOfferId(null);
-    setForm({
+    const nextForm = {
       ...defaultForm,
       currencyCode: brand?.shopifyCurrencyCode || "CAD",
-    });
+    };
+    setForm(nextForm);
+    setSavedForm(nextForm);
   }
 
   async function saveOffer() {
@@ -548,10 +564,8 @@ function ShopifyBrandRewardsPanel() {
   }
 
   return (
-    <BrandPageShell
-      title="Rewards"
-      description="Create Shopify discount offers that customers can claim with SQRATCH points."
-    >
+    <>
+      {discardDialog}
       <PageCard>
         {loading ? (
           <p className="text-sm text-copy-65">Loading rewards...</p>
@@ -1105,36 +1119,116 @@ function ShopifyBrandRewardsPanel() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => editOffer(offer)}
+                    onClick={() => guard(() => editOffer(offer))}
                     className="rounded-full border-edge/20 bg-transparent text-ink hover:bg-glass-10"
                   >
                     <Pencil className="h-4 w-4" />
                     Edit
                   </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    onClick={() => void disableOffer(offer.id)}
-                    disabled={!offer.isActive || disablingId === offer.id}
-                    className="rounded-full border border-red-500/40 bg-red-500 text-white hover:bg-red-500/90"
-                  >
-                    <Power className="h-4 w-4" />
-                    {disablingId === offer.id ? "Disabling..." : "Disable"}
-                  </Button>
+                  <ConfirmDestructive
+                    title={`Disable "${offer.title}"?`}
+                    description="Customers can no longer redeem this reward offer. Past redemptions are kept."
+                    confirmLabel="Disable offer"
+                    onConfirm={() => disableOffer(offer.id)}
+                    trigger={
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        disabled={!offer.isActive || disablingId === offer.id}
+                        className="rounded-full border border-red-500/40 bg-red-500 text-white hover:bg-red-500/90"
+                      >
+                        <Power className="h-4 w-4" />
+                        {disablingId === offer.id ? "Disabling..." : "Disable"}
+                      </Button>
+                    }
+                  />
                 </div>
               </div>
             ))
           )}
         </div>
       </PageCard>
+    </>
+  );
+}
+
+type ProviderKey = "SHOPIFY" | "COMMERCE7";
+type ProviderPresence = { provider: ProviderKey; offerCount: number; claimCount: number; visible: boolean; connection: { status: string; displayName: string; usable: boolean } | null };
+const PROVIDER_LABEL: Record<ProviderKey, string> = { SHOPIFY: "Shopify", COMMERCE7: "Commerce7" };
+const PROVIDER_DESCRIPTION: Record<ProviderKey, string> = {
+  SHOPIFY: "Create Shopify discount offers that customers can claim with SQRATCH points.",
+  COMMERCE7: "Create Commerce7 rewards that customers can claim with SQRATCH points.",
+};
+const RECONNECT_HREF: Record<ProviderKey, string> = { SHOPIFY: "/dashboard/brand/shopify", COMMERCE7: "/dashboard/brand/commerce" };
+const asProvider = (value: string | null): ProviderKey | null => (value === "SHOPIFY" || value === "COMMERCE7" ? value : null);
+
+function RewardsWorkspace() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [presence, setPresence] = useState<ProviderPresence[] | null>(null);
+  useEffect(() => {
+    // Read once per visit. The workspace never re-reads this to move the Brand between providers.
+    void fetchJson<{ providers: ProviderPresence[] }>("/api/brand/rewards/providers")
+      .then((value) => setPresence(value.providers))
+      // Never hide a workspace because the check failed: offer both and let the Brand choose.
+      .catch(() => setPresence((["SHOPIFY", "COMMERCE7"] as const).map((provider) => ({ provider, offerCount: 0, claimCount: 0, visible: true, connection: { status: "UNKNOWN", displayName: "", usable: true } }))));
+  }, []);
+  if (!presence) return <p className="p-6" role="status">Loading rewards…</p>;
+
+  const available = presence.filter((entry) => entry.visible).map((entry) => entry.provider);
+  // The URL decides. Only with no valid ?provider= does the first listed provider open, and that default is fixed by the
+  // Brand's history (connection, offers, claims), which does not disappear when a provider disconnects.
+  const requested = asProvider(searchParams.get("provider"));
+  const selected: ProviderKey = requested ?? available[0] ?? "SHOPIFY";
+  const tabs = (["SHOPIFY", "COMMERCE7"] as const).filter((provider) => available.includes(provider) || provider === selected);
+  const current = presence.find((entry) => entry.provider === selected) ?? null;
+  const select = (provider: ProviderKey) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("provider", provider);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  return (
+    <BrandPageShell title="Rewards" description={PROVIDER_DESCRIPTION[selected]}>
+      {tabs.length > 1 && (
+        <div role="tablist" aria-label="Rewards provider" className="flex flex-wrap gap-2">
+          {tabs.map((provider) => {
+            const entry = presence.find((row) => row.provider === provider);
+            const usable = entry?.connection?.usable ?? false;
+            return (
+              <button
+                key={provider}
+                type="button"
+                role="tab"
+                aria-selected={provider === selected}
+                onClick={() => select(provider)}
+                className={`rounded-full border px-4 py-2 text-sm ${provider === selected ? "border-edge/40 bg-glass-10 font-semibold" : "border-edge/10 bg-transparent text-copy-65"}`}
+              >
+                {PROVIDER_LABEL[provider]}
+                {entry && !usable ? <span className="ml-2 text-xs text-amber-700 dark:text-amber-200">not connected</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {current && !current.connection?.usable && (
+        <div role="note" className="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-700 dark:text-amber-100">
+          <p>
+            {PROVIDER_LABEL[selected]} is {current.connection ? "not currently connected" : "not connected"}. Past offers and claims stay visible here as read-only history; rewards cannot be created or enabled until it is reconnected.
+          </p>
+          <a className="mt-2 inline-block underline" href={RECONNECT_HREF[selected]}>Reconnect {PROVIDER_LABEL[selected]}</a>
+        </div>
+      )}
+      {selected === "COMMERCE7" ? <Commerce7BrandRewardsPanel key="COMMERCE7" /> : <ShopifyBrandRewardsPanel key="SHOPIFY" />}
     </BrandPageShell>
   );
 }
 
 export default function BrandRewardsPage() {
-  const [providers, setProviders] = useState<Commerce7BrandRewardData["providers"] | null>(null);
-  const [provider, setProvider] = useState<"SHOPIFY" | "COMMERCE7">("SHOPIFY");
-  useEffect(() => { void fetchJson<Commerce7BrandRewardData>("/api/brand/rewards/commerce7").then((data) => { setProviders(data.providers); if (data.providers.COMMERCE7 && !data.providers.SHOPIFY) setProvider("COMMERCE7"); }).catch(() => setProviders({ SHOPIFY: true, COMMERCE7: false })); }, []);
-  if (!providers) return <p className="p-6" role="status">Loading rewards…</p>;
-  return <>{providers.SHOPIFY && providers.COMMERCE7 && <label className="block px-6 pt-6 text-sm">Rewards provider<select className="ml-3 rounded border p-2" value={provider} onChange={(event) => setProvider(event.target.value as "SHOPIFY" | "COMMERCE7")}><option value="SHOPIFY">Shopify</option><option value="COMMERCE7">Commerce7</option></select></label>}{provider === "COMMERCE7" ? <Commerce7BrandRewardsPanel /> : <ShopifyBrandRewardsPanel />}</>;
+  return (
+    <Suspense fallback={<p className="p-6" role="status">Loading rewards…</p>}>
+      <RewardsWorkspace />
+    </Suspense>
+  );
 }

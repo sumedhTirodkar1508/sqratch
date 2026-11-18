@@ -6,6 +6,7 @@ import { getCommerce7AppConfig } from "@/lib/commerce/providers/commerce7";
 import { Commerce7RewardsClient } from "@/lib/commerce/providers/commerce7-rewards-client";
 import { COMMERCE7_EXCLUSIVE_ACCESS_CONTRACT, commerce7ExclusiveSecurity, commerce7GrantableTag, frozenExclusiveAccess, RewardClaimError } from "@/lib/commerce7-reward-domain";
 import { rewardErrorResponse } from "@/lib/commerce7-reward-http";
+import { sharedCommerce7ExclusiveProducts } from "@/lib/commerce7-brand-rewards-read";
 export const maxDuration = 30;
 /** Bounded live reads per request; a product secured to more tags is refused rather than partially resolved. */
 const MAX_TAGS = 10;
@@ -24,8 +25,8 @@ export async function GET(request: NextRequest) {
     if (!productId || productId.length > 100 || (offerId !== null && offerId.length > 100)) throw new RewardClaimError("INVALID_OFFER", "Choose a synchronized product.", 400);
     const connection = await getActiveCommerceConnection(brandId, "COMMERCE7");
     if (!connection || !isConnectionUsable(connection)) throw new RewardClaimError("CONNECTION_UNAVAILABLE", "Connect Commerce7 before configuring rewards.");
-    const catalog = await prisma.connectedCommerceProduct.findMany({ where: { brandId, connectionId: connection.id, provider: "COMMERCE7", isAvailable: true }, select: { externalId: true, title: true, providerMetadata: true }, take: 500 });
-    const product = catalog.find((row) => row.externalId === productId);
+    // The chosen product is read directly by id, so its position in the catalog never matters.
+    const product = await prisma.connectedCommerceProduct.findFirst({ where: { brandId, connectionId: connection.id, provider: "COMMERCE7", isAvailable: true, externalId: productId }, select: { externalId: true, title: true, providerMetadata: true } });
     const tagIds = product ? commerce7ExclusiveSecurity(product.providerMetadata)?.tagIds ?? null : null;
     if (!product || !tagIds) throw new RewardClaimError("INVALID_OFFER", "Choose a product secured to a Customer Tag in Commerce7, then sync products in SQRATCH.", 400);
     if (tagIds.length > MAX_TAGS) throw new RewardClaimError("INVALID_OFFER", `This product is secured to more than ${MAX_TAGS} Customer Tags. Choose a product with fewer tags.`, 400);
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
     for (const id of tagIds) {
       const tag = await client.customerTag(id);
       const selectable = commerce7GrantableTag(tag, id);
-      const shared = catalog.filter((row) => row.externalId !== productId && (commerce7ExclusiveSecurity(row.providerMetadata)?.tagIds ?? []).includes(id));
+      const shared = await sharedCommerce7ExclusiveProducts(prisma, brandId, connection.id, id, productId);
       tags.push({
         id, title: tag?.title ?? null, selectable, current: id === current,
         reason: !tag ? "NOT_FOUND" : selectable ? null : tag.type !== COMMERCE7_EXCLUSIVE_ACCESS_CONTRACT.tagType ? "NOT_MANUAL" : "NOT_CUSTOMER",

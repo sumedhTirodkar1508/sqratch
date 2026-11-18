@@ -62,9 +62,11 @@ export async function middleware(request: NextRequest) {
   // Expose the requested pathname to server layouts (e.g. the Brand dashboard
   // layout needs to distinguish the Shopify install route to render its
   // access-denied messaging precisely) without each layout re-deriving it.
-  const response = NextResponse.next();
-  response.headers.set("x-pathname", url.pathname);
-  return response;
+  // It must be a REQUEST header: layouts read it via next/headers, and a
+  // response header is never visible to them.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", url.pathname);
+  return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export const config = {

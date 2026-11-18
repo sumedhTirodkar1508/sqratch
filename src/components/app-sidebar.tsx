@@ -22,6 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import {
@@ -85,7 +86,7 @@ function Section({
                   isActive={isActive}
                   className="group rounded-lg border border-transparent text-copy-90 transition-[background-color,color,border-color,box-shadow] duration-200 hover:border-sidebar-border hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar data-[active=true]:border-sidebar-border motion-reduce:transition-none dark:hover:border-edge/20 dark:hover:bg-blue-950/10 dark:hover:backdrop-blur-sm dark:hover:shadow-lg dark:hover:shadow-blue-600/20"
                 >
-                  <a
+                  <Link
                     href={item.url}
                     aria-current={
                       isActive
@@ -96,7 +97,7 @@ function Section({
                   >
                     <item.icon className="w-5 h-5 transition-transform duration-200 dark:group-hover:scale-110 motion-reduce:transition-none motion-reduce:transform-none" />
                     <span className="font-medium">{item.title}</span>
-                  </a>
+                  </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             );

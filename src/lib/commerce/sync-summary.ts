@@ -24,6 +24,13 @@ export type SyncSummary = {
   lastAttempt: SyncAttemptSummary | null;
 };
 
+/**
+ * A RUNNING run that has not finished this long after it started almost certainly
+ * died (a crashed or timed-out request never writes its final status). It is shown
+ * as "did not finish" rather than "in progress" forever.
+ */
+export const STALE_RUNNING_AFTER_MS = 30 * 60 * 1000;
+
 export const EMPTY_SYNC_SUMMARY: SyncSummary = { lastCompletedSyncAt: null, lastAttempt: null };
 
 type Db = Pick<typeof prisma, "commerceProductSyncRun">;
@@ -61,7 +68,7 @@ export async function loadSyncSummaries(
   return result;
 }
 
-export function serializeSyncSummary(summary: SyncSummary | undefined) {
+export function serializeSyncSummary(summary: SyncSummary | undefined, now: Date = new Date()) {
   const value = summary ?? EMPTY_SYNC_SUMMARY;
   return {
     lastCompletedSyncAt: value.lastCompletedSyncAt,
@@ -70,6 +77,9 @@ export function serializeSyncSummary(summary: SyncSummary | undefined) {
           status: value.lastAttempt.status,
           startedAt: value.lastAttempt.startedAt,
           finishedAt: value.lastAttempt.finishedAt,
+          stale:
+            value.lastAttempt.status === "RUNNING" &&
+            now.getTime() - value.lastAttempt.startedAt.getTime() > STALE_RUNNING_AFTER_MS,
         }
       : null,
   };

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { BrandPageShell } from "@/components/brand/page-shell";
 import { fetchJson, getErrorMessage } from "@/components/experience/client-utils";
+import { ConfirmDestructive } from "@/components/confirm-destructive";
 import { PageCard } from "@/components/experience/experience-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +35,8 @@ type CommerceConnectionSummary = {
 
 type SyncAttempt = {
   status: "RUNNING" | "SUCCEEDED" | "PARTIAL" | "FAILED";
+  /** A RUNNING attempt old enough that it can no longer be in progress. */
+  stale?: boolean;
   startedAt: string;
   finishedAt: string | null;
 };
@@ -52,7 +55,8 @@ const ATTEMPT_LABELS: Record<SyncAttempt["status"], string> = {
 
 function describeAttempt(attempt: SyncAttempt | null | undefined): string {
   if (!attempt) return "No sync has been attempted";
-  return `${ATTEMPT_LABELS[attempt.status]} · ${formatDateTime(attempt.finishedAt ?? attempt.startedAt)}`;
+  const label = attempt.stale ? "Did not finish (no result was recorded)" : ATTEMPT_LABELS[attempt.status];
+  return `${label} · ${formatDateTime(attempt.finishedAt ?? attempt.startedAt)}`;
 }
 
 const STATE_STYLES: Record<string, { label: string; className: string; hint: string | null }> = {
@@ -449,13 +453,6 @@ function Commerce7ConnectionLifecycleControl({
   const [appNotInstalled, setAppNotInstalled] = useState(false);
 
   async function handleDisconnect() {
-    const confirmed = window.confirm(
-      "Disconnect this Commerce7 store from SQRATCH?\n\n" +
-        "Historical products, orders, and analytics will be preserved. " +
-        "New syncs, public product links, and order ingestion will stop until you reconnect.",
-    );
-    if (!confirmed) return;
-
     setBusy(true);
     setError(null);
     try {
@@ -502,14 +499,21 @@ function Commerce7ConnectionLifecycleControl({
   if (connection.status === "CONNECTED") {
     return (
       <div className="space-y-2">
-        <Button
-          onClick={() => void handleDisconnect()}
-          disabled={busy}
-          variant="outline"
-          className="rounded-full border-red-400/30 bg-transparent text-red-700 dark:text-red-200 hover:bg-red-400/10"
-        >
-          {busy ? "Disconnecting..." : "Disconnect Commerce7"}
-        </Button>
+        <ConfirmDestructive
+          title="Disconnect this Commerce7 store?"
+          description="Historical products, orders, and analytics are preserved. New syncs, public product links, and order ingestion stop until you reconnect."
+          confirmLabel="Disconnect Commerce7"
+          onConfirm={handleDisconnect}
+          trigger={
+            <Button
+              disabled={busy}
+              variant="outline"
+              className="rounded-full border-red-400/30 bg-transparent text-red-700 dark:text-red-200 hover:bg-red-400/10"
+            >
+              {busy ? "Disconnecting..." : "Disconnect Commerce7"}
+            </Button>
+          }
+        />
         {error ? <p className="text-xs text-red-700 dark:text-red-300">{error}</p> : null}
         <p className="text-[11px] leading-4 text-copy-40">
           To connect a different Commerce7 store, disconnect this store first, then open/install

@@ -2,6 +2,7 @@ import { getCreatorContext } from "@/lib/creator-auth";
 import prisma from "@/lib/prisma";
 import { createLessonVideoUploadHandler } from "@/lib/lesson-video-upload-handler";
 import { createSignedUploadUrl } from "@/lib/storage-upload";
+import { stageUpload } from "@/lib/staged-assets";
 
 export const POST = createLessonVideoUploadHandler({
   getCreator: getCreatorContext,
@@ -25,4 +26,5 @@ export const POST = createLessonVideoUploadHandler({
       },
     }),
   signUpload: createSignedUploadUrl,
+  stageUpload: (input) => stageUpload(prisma, input),
 });

@@ -29,6 +29,13 @@ type UploadRouteDependencies = {
     path: string;
     upsert: boolean;
   }) => Promise<SignedUploadResult>;
+  /** Records the upload before its signed URL is returned, so every object has an owner row. */
+  stageUpload?: (input: {
+    bucket: string;
+    path: string;
+    ownerUserId: string;
+    courseId: string;
+  }) => Promise<void>;
 };
 
 function buildVideoPath(options: {
@@ -105,6 +112,13 @@ export function createLessonVideoUploadHandler(
           fileName,
         }),
         upsert: false,
+      });
+
+      await dependencies.stageUpload?.({
+        bucket: signedUpload.bucket,
+        path: signedUpload.path,
+        ownerUserId: creator.userId,
+        courseId: course.id,
       });
 
       return NextResponse.json({

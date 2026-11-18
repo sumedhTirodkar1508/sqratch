@@ -1804,4 +1804,36 @@ enum RewardProvisioningState {
   REVOKED
 }
 
+enum StagedAssetStatus {
+  STAGED
+  ATTACHED
+  CLEANUP_CLAIMED
+  DELETED
+}
+
+/// Ownership record for an uploaded lesson-video object. Attachment and cleanup
+/// compete for this one row with conditional updates, so an attached object is
+/// never deleted and a claimed object is never attached. No foreign keys on
+/// purpose: the row must outlive the lesson, course or user it described until
+/// the object is gone from storage.
+model StagedAsset {
+  id               String            @id @default(cuid())
+  bucket           String
+  path             String
+  kind             String            @default("LESSON_VIDEO")
+  ownerUserId      String
+  courseId         String
+  lessonId         String?
+  status           StagedAssetStatus @default(STAGED)
+  createdAt        DateTime          @default(now())
+  attachedAt       DateTime?
+  cleanupClaimedAt DateTime?
+  deletedAt        DateTime?
+  attempts         Int               @default(0)
+  lastError        String?
+
+  @@unique([bucket, path])
+  @@index([status, createdAt])
+  @@index([lessonId])
+}
 

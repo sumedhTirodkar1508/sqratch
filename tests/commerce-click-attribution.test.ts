@@ -1750,6 +1750,16 @@ describe("Phase 10 write-once durability: no code path rewrites surface or attri
         assert.equal(checked.split(statement).length, 2, "missing or duplicate course lock");
         checked = checked.replace(statement, "");
       }
+      if (relative === "src/lib/lesson-video-lifecycle.ts") {
+        // Exact row locks only: the lesson (or course) being changed, taken before its video is read.
+        for (const [statement, count] of [
+          ['tx.$queryRaw`SELECT id FROM "Lesson" WHERE id = ${input.lessonId} FOR UPDATE`', 2],
+          ['tx.$queryRaw`SELECT id FROM "Course" WHERE id = ${input.courseId} FOR UPDATE`', 1],
+        ] as const) {
+          assert.equal(checked.split(statement).length, count + 1, `unexpected lesson-video lock count: ${statement}`);
+          checked = checked.split(statement).join("");
+        }
+      }
       assert.doesNotMatch(checked, /\$executeRaw/, `${relative} uses $executeRaw`);
       assert.doesNotMatch(checked, /\$queryRaw/, `${relative} uses $queryRaw`);
       assert.doesNotMatch(checked, /Prisma\.sql/, `${relative} builds raw SQL`);

@@ -13,6 +13,7 @@ import {
   validateLessonVideoStorageUrl,
 } from "@/lib/storage-upload";
 import { resolveActiveBrandContext } from "@/lib/brand-context";
+import { requestStagedCleanup, settleClaimedAssets } from "@/lib/staged-assets";
 
 /**
  * Returns the brand-asset bucket name (mirrors brand-asset/route.ts convention).
@@ -109,6 +110,18 @@ async function isCreatorOwnedPath(
   return false;
 }
 
+async function claimLessonVideoCleanup(
+  object: { bucket: string; path: string },
+  options: { ownerUserId: string; courseId?: string; anyOwner?: boolean },
+) {
+  const result = await requestStagedCleanup(prisma, { object, ...options });
+  if (!result.ok) {
+    return NextResponse.json({ error: "This asset is in use and cannot be deleted.", code: "ASSET_IN_USE" }, { status: 409 });
+  }
+  const deleted = result.claimedId ? (await settleClaimedAssets(prisma, [result.claimedId], deleteFileFromStorage)) > 0 : true;
+  return NextResponse.json({ data: { deleted } });
+}
+
 async function deleteUnreferencedObject(object: { bucket: string; path: string }, url?: string) {
   if (await isMediaReferenced(prisma, object, url)) {
     return NextResponse.json({ error: "This asset is in use and cannot be deleted.", code: "ASSET_IN_USE" }, { status: 409 });
@@ -195,9 +208,10 @@ export async function DELETE(request: NextRequest) {
         );
       }
 
-      // When an explicit bucket/path was authorized, never delete a separate
-      // client-supplied URL instead of the object we just checked.
-      return await deleteUnreferencedObject(lessonVideoReference, bucket || path ? undefined : url);
+      // Lesson videos are never deleted directly: the request claims the staged
+      // row (only possible while the upload is not attached to a lesson) and the
+      // deletion follows, retried by the sweeper if storage is down.
+      return await claimLessonVideoCleanup(lessonVideoReference, { ownerUserId: session.user.id, courseId: course!.id });
     }
 
     if (!url) {
@@ -220,6 +234,10 @@ export async function DELETE(request: NextRequest) {
       }
       const object = parsePublicStorageUrl(url);
       if (!object) return NextResponse.json({ error: "Invalid storage object URL." }, { status: 400 });
+      // Lesson videos go through the same claim as everyone else: an attached or referenced one is refused.
+      if (object.bucket === getLessonVideoBucket()) {
+        return await claimLessonVideoCleanup(object, { ownerUserId: session.user.id, anyOwner: true });
+      }
       return await deleteUnreferencedObject(object, url);
     }
 

@@ -9,6 +9,7 @@ import { assertExpectedBrand, getBrandContextFailure } from "../src/lib/brand-au
 
 function harness(role: string, referenced: boolean) {
   const deleted: string[] = [];
+  let claimed: { bucket: string; path: string } | null = null;
   const brand = { id: "brand", name: "Brand", slug: "brand" };
   const context = { membership: { brand }, selectionRequired: false };
   const modules: Record<string, unknown> = {
@@ -18,6 +19,18 @@ function harness(role: string, referenced: boolean) {
     "@/lib/media-references": { isMediaReferenced: async () => referenced },
     "@/lib/brand-auth": { assertExpectedBrand, getBrandContextFailure, getBrandAdminContext: async () => context },
     "@/lib/brand-context": { resolveActiveBrandContext: async () => context },
+    // Lesson videos are claimed through the staged-asset row and deleted after the claim.
+    "@/lib/staged-assets": {
+      requestStagedCleanup: async (_db: unknown, input: { object: { bucket: string; path: string } }) => {
+        if (referenced) return { ok: false, reason: "IN_USE" };
+        claimed = input.object;
+        return { ok: true, claimedId: "row" };
+      },
+      settleClaimedAssets: async (_db: unknown, _ids: string[], deleteObject: (bucket: string, path: string) => Promise<boolean>) => {
+        await deleteObject(claimed!.bucket, claimed!.path);
+        return 1;
+      },
+    },
     "@/lib/prisma": { __esModule: true, default: { course: { findFirst: async () => ({ id: "course", experience: { slug: "exp" } }) }, experience: { findFirst: async () => ({ id: "exp" }) } } },
     "@/lib/storage-upload": {
       getLessonVideoBucket: () => "lesson-videos",
@@ -40,6 +53,8 @@ test("attached objects are rejected for each authorized role", async () => {
     ["BRAND_ADMIN", { url: "https://storage.test/storage/v1/object/public/brand-assets/brands/brand/logo/a.png" }],
     ["CREATOR", { url: "https://storage.test/storage/v1/object/public/user-avatars/users/owner/avatar/a.png" }],
     ["CREATOR", { courseId: "course", bucket: "lesson-videos", path: "experiences/exp/courses/course/lessons/video.mp4" }],
+    // An administrator gets the same refusal for another creator's attached lesson video.
+    ["ADMIN", { url: "https://storage.test/storage/v1/object/public/lesson-videos/experiences/exp/courses/course/lessons/video.mp4" }],
   ] as const) {
     const h = harness(role, true); const response = await h.call(body);
     assert.equal(response.status, 409); assert.equal((await response.json()).code, "ASSET_IN_USE"); assert.deepEqual(h.deleted, []);

@@ -1,29 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCreatorContext } from "@/lib/creator-auth";
-import {
-  resolveLessonVideoStorageReference,
-  type LessonVideoStorageReference,
-} from "@/lib/lesson-video-reference";
 import prisma from "@/lib/prisma";
 import { deleteFileFromStorage } from "@/lib/storage-upload";
+import { settleClaimedAssets } from "@/lib/staged-assets";
+import { deleteCourseReleasingVideos } from "@/lib/lesson-video-lifecycle";
 import { parseRewardPoints } from "@/lib/reward-points-input";
-
-async function cleanupLessonVideo(
-  reference: LessonVideoStorageReference | null,
-  context: string,
-) {
-  if (!reference) {
-    return;
-  }
-
-  const deleted = await deleteFileFromStorage(reference.bucket, reference.path);
-
-  if (!deleted) {
-    console.error(
-      `[creator/courses][${context}] Failed to delete lesson video object.`,
-    );
-  }
-}
 
 export async function GET(request: NextRequest) {
   try {
@@ -355,20 +336,14 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Course not found." }, { status: 404 });
     }
 
-    const videoReferences = course.lessons.map((lesson) =>
-      resolveLessonVideoStorageReference({
-        lesson,
-        courseId: lesson.courseId,
-        experienceSlug: lesson.course.experience.slug,
-      }),
-    );
+    const claimedIds = await deleteCourseReleasingVideos(prisma, {
+      courseId: course.id,
+      experienceSlug: course.lessons[0]?.course.experience.slug ?? "",
+      ownerUserId: creator.userId,
+    });
 
-    await prisma.course.delete({ where: { id: course.id } });
-
-    await Promise.all(
-      videoReferences.map((reference) =>
-        cleanupLessonVideo(reference, "DELETE"),
-      ),
+    await settleClaimedAssets(prisma, claimedIds, deleteFileFromStorage).catch(() =>
+      console.error("[creator/courses][DELETE] Deferred lesson video cleanup."),
     );
 
     return NextResponse.json({ data: { id: course.id } });

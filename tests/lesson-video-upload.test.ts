@@ -253,27 +253,24 @@ test("client uploads before persistence and cleans a new object only after defin
   );
 });
 
-test("lesson replacement cleanup is ordered safely and YouTube persistence remains unchanged", async () => {
-  const source = await readFile(
-    new URL("../src/app/api/creator/lessons/route.ts", import.meta.url),
-    "utf8",
-  );
-  const updateIndex = source.indexOf(
-    "const lesson = await prisma.lesson.update({",
-  );
-  const cleanupIndex = source.indexOf(
-    'await cleanupLessonVideo(oldReference, "PATCH");',
-  );
+test("lesson replacement cleanup is claimed in the save transaction and deleted only after commit", async () => {
+  const route = await readFile(new URL("../src/app/api/creator/lessons/route.ts", import.meta.url), "utf8");
+  const lifecycle = await readFile(new URL("../src/lib/lesson-video-lifecycle.ts", import.meta.url), "utf8");
 
-  assert.ok(updateIndex >= 0);
-  assert.ok(cleanupIndex > updateIndex);
-  assert.match(
-    source,
-    /youtubeUrl: videoSource === "YOUTUBE" \? youtubeUrl : null/,
-  );
-  assert.match(
-    source,
-    /videoStorageBucket: videoReference\?\.bucket \|\| null/,
-  );
-  assert.doesNotMatch(source, /videoUploadUrl:\s*videoAssetUrl/);
+  // The route saves (and claims) first; storage deletion only follows the commit.
+  const saveIndex = route.indexOf("await saveLessonWithVideo(prisma");
+  const settleIndex = route.indexOf("await settleClaimedAssets(prisma, claimedIds, deleteFileFromStorage)");
+  assert.ok(saveIndex >= 0);
+  assert.ok(settleIndex > saveIndex);
+  assert.doesNotMatch(route, /deleteFileFromStorage\(reference/, "no inline deletion in the route");
+  assert.match(route, /youtubeUrl: videoSource === "YOUTUBE" \? youtubeUrl : null/);
+  assert.doesNotMatch(route, /videoUploadUrl:\s*videoAssetUrl/);
+
+  // One transaction: lock the lesson, attach the new upload, update, then release the rest.
+  assert.match(lifecycle, /videoStorageBucket: input\.videoReference\?\.bucket \|\| null/);
+  const lock = lifecycle.indexOf('FROM "Lesson" WHERE id = ${input.lessonId} FOR UPDATE');
+  const attach = lifecycle.indexOf("await attachLessonVideo(tx");
+  const update = lifecycle.indexOf("await tx.lesson.update(");
+  const release = lifecycle.indexOf("await releaseLessonVideos(tx");
+  assert.ok(lock >= 0 && attach > lock && update > attach && release > update);
 });

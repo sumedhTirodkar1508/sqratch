@@ -360,7 +360,14 @@ export async function deleteFileFromStorage(bucket: string, path: string) {
     },
   );
 
-  return response.ok;
+  if (response.ok || response.status === 404) return true;
+  // Some storage versions answer a missing object with HTTP 400 and a 404 in the body.
+  // Either way it is already gone, so a retried cleanup finishes.
+  if (response.status === 400) {
+    const body = await response.text().catch(() => "");
+    return /"statusCode"\s*:\s*"?404"?|object not found/i.test(body);
+  }
+  return false;
 }
 
 export async function deleteStorageObjectByUrl(url: string | null | undefined) {

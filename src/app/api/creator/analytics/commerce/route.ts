@@ -47,6 +47,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCreatorContext as defaultGetCreatorContext } from "@/lib/creator-auth";
 import type { getCreatorContext as GetCreatorContext } from "@/lib/creator-auth";
 import prisma from "@/lib/prisma";
+import { buildReportMeta, requestedFilterNames, type ReportMeta } from "@/lib/report-meta";
 import { resolveCuratedProductTitle } from "@/lib/commerce/campaign-product-curation";
 import {
   buildCommerceClickTotals,
@@ -105,6 +106,8 @@ export type CreatorCommerceProductRow = {
  */
 export type CreatorCommerceAnalyticsResponse = {
   data: {
+    /** What this report covers: the creator's own experiences, or the one selected. */
+    meta: ReportMeta;
     /** Inclusive UTC instants, as ISO strings. */
     range: { start: string; end: string };
     filters: {
@@ -228,6 +231,7 @@ function parseLimit(
 
 /** The zero-state body, used whenever the authorized scope contains no ids. */
 function emptyResponse(input: {
+  meta: ReportMeta;
   range: { start: Date; end: Date };
   experienceId: string | null;
   limit: number;
@@ -235,6 +239,7 @@ function emptyResponse(input: {
 }): CreatorCommerceAnalyticsResponse {
   return {
     data: {
+      meta: input.meta,
       range: {
         start: input.range.start.toISOString(),
         end: input.range.end.toISOString(),
@@ -326,6 +331,15 @@ export async function creatorCommerceAnalyticsGetImpl(
       experienceIds,
     };
 
+    const meta = buildReportMeta({
+      period: range,
+      dateBasis: "event",
+      scope: requestedExperienceId === null ? "creator" : "experience",
+      appliedFilters: requestedExperienceId === null ? {} : { experienceId: requestedExperienceId },
+      unsupportedFilters: requestedFilterNames(params, ["campaignId"]),
+      now: deps.now(),
+    });
+
     // A creator with no Experiences (or a narrowing filter that somehow left
     // nothing) gets a clean zero state. The repository already short-circuits
     // an empty scope, but an empty `in: []` must never reach a query at all, so
@@ -333,6 +347,7 @@ export async function creatorCommerceAnalyticsGetImpl(
     if (isEmptyCommerceClickAnalyticsScope(scope)) {
       return NextResponse.json(
         emptyResponse({
+          meta,
           range,
           experienceId: requestedExperienceId,
           limit,
@@ -433,6 +448,7 @@ export async function creatorCommerceAnalyticsGetImpl(
 
     const body: CreatorCommerceAnalyticsResponse = {
       data: {
+        meta,
         range: {
           start: range.start.toISOString(),
           end: range.end.toISOString(),

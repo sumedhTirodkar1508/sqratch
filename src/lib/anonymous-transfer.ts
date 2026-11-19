@@ -153,7 +153,7 @@ async function moveLessonProgressRow(
   // latest committed values and a concurrent anonymous save is never lost.
   const row = await tx.lessonProgress.findUniqueOrThrow({
     where: { id: rowId },
-    select: { lessonId: true, lastPositionSeconds: true, isCompleted: true },
+    select: { lessonId: true, lastPositionSeconds: true, isCompleted: true, completedAt: true },
   });
 
   await tx.lessonProgress.delete({ where: { id: rowId } });
@@ -193,6 +193,7 @@ async function moveUnlock(
         userId,
         userEmail,
         db: tx,
+        honorExistingAnonymousUnlock: true,
       });
       if (redemption.redeemed) {
         pointAwarded = await awardQrPointOnce(tx, userId, unlock.qrCodeId);
@@ -208,6 +209,7 @@ async function moveUnlock(
       userId,
       userEmail,
       db: tx,
+      honorExistingAnonymousUnlock: true,
     });
     if (!redemption.redeemed) {
       await tx.campaignUnlock.delete({ where: { id: unlockId } });

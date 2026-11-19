@@ -23,6 +23,7 @@ import {
   parseOrderDateRange,
   resolveDisplayOrderDate,
 } from "@/lib/commerce/order-list";
+import { parseOrderDateBasis, type OrderDateBasis } from "@/lib/commerce/order-date-basis";
 import type { CommerceOrderFinancialStatus, CommerceOrderFulfillmentStatus, CommerceProvider, Prisma } from "@prisma/client";
 
 /**
@@ -77,7 +78,7 @@ export type BrandCommerceOrderListDeps = {
     attributionWhere: Prisma.CommerceOrderWhereInput;
     /** PHASE B — order-number substring match. The ONLY free-text search; never customer data. */
     orderNumberWhere: Prisma.CommerceOrderWhereInput;
-    /** PHASE B — business-order-date range (`providerCreatedAt ?? createdAt`). */
+    /** PHASE B — order-date range, on the chosen basis (default `providerCreatedAt ?? createdAt`). */
     dateWhere: Prisma.CommerceOrderWhereInput;
     cursorWhere: Prisma.CommerceOrderWhereInput | null;
     limit: number;
@@ -148,6 +149,8 @@ export type BrandCommerceOrderListQuery = {
   orderNumber: string | null;
   dateFrom: string | null;
   dateTo: string | null;
+  /** `provider` (default) or `ingested`: which date `dateFrom`/`dateTo` compare against. */
+  dateBasis: string | null;
   attributed: string | null;
   cursor: string | null;
   limit: string | null;
@@ -161,6 +164,7 @@ const EMPTY_QUERY: BrandCommerceOrderListQuery = {
   orderNumber: null,
   dateFrom: null,
   dateTo: null,
+  dateBasis: null,
   attributed: null,
   cursor: null,
   limit: null,
@@ -178,6 +182,7 @@ export async function GET(request: NextRequest) {
       orderNumber: params.get("orderNumber"),
       dateFrom: params.get("dateFrom"),
       dateTo: params.get("dateTo"),
+      dateBasis: params.get("dateBasis"),
       attributed: params.get("attributed"),
       cursor: params.get("cursor"),
       limit: params.get("limit"),
@@ -233,6 +238,14 @@ export async function brandCommerceOrdersGetImpl(
       );
     }
 
+    const dateBasis: OrderDateBasis | null = parseOrderDateBasis(query.dateBasis);
+    if (!dateBasis) {
+      return NextResponse.json(
+        { error: '"dateBasis" must be provider or ingested.', code: "INVALID_DATE_BASIS" },
+        { status: 400 },
+      );
+    }
+
     const orderNumberSearch = normalizeOrderNumberSearch(query.orderNumber);
     if (!orderNumberSearch.ok) {
       return NextResponse.json(
@@ -252,7 +265,7 @@ export async function brandCommerceOrdersGetImpl(
       connectionId,
       attributionWhere: buildAttributionWhere(attributionFilter),
       orderNumberWhere: buildOrderNumberWhere(orderNumberSearch.value),
-      dateWhere: buildOrderDateWhere(dateRange.from, dateRange.to),
+      dateWhere: buildOrderDateWhere(dateRange.from, dateRange.to, dateBasis),
       cursorWhere: cursor ? buildCommerceOrderCursorWhere(cursor) : null,
       limit,
     });
@@ -286,7 +299,7 @@ export async function brandCommerceOrdersGetImpl(
 
     return NextResponse.json({
       data,
-      meta: { hasNextPage, nextCursor, limit },
+      meta: { hasNextPage, nextCursor, limit, dateBasis },
     });
   } catch (error) {
     console.error("[brand/commerce/orders][GET] Error:", error);

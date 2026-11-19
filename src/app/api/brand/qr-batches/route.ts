@@ -65,6 +65,7 @@ export async function listQrBatchesImpl(request: NextRequest, deps: AuthResolver
           name: true,
           createdAt: true,
           archivedAt: true,
+          redemptionStoppedAt: true,
           csvExportedAt: true,
           printedAt: true,
           qrCodes: { where: { NOT: { ...unusedQrWhere, campaign: { brandId } } }, select: { id: true }, take: 1 },
@@ -98,6 +99,7 @@ export async function listQrBatchesImpl(request: NextRequest, deps: AuthResolver
           qrCodeUrl: true,
           email: true,
           usedAt: true,
+          redemptionStoppedAt: true,
           createdAt: true,
           batch: {
             select: {
@@ -131,6 +133,7 @@ export async function listQrBatchesImpl(request: NextRequest, deps: AuthResolver
           name: batch.name,
           createdAt: batch.createdAt,
           archivedAt: batch.archivedAt,
+          redemptionStoppedAt: batch.redemptionStoppedAt,
           quantity: batch._count.qrCodes,
           canDelete: !batch.csvExportedAt && !batch.printedAt && batch.qrCodes.length === 0,
           campaign: batch.campaign,
@@ -138,7 +141,8 @@ export async function listQrBatchesImpl(request: NextRequest, deps: AuthResolver
         qrCodes: qrCodes.map((qrCode) => ({
           id: qrCode.id,
           code: qrCode.qrCodeData,
-          status: qrCode.status === "USED" ? "REDEEMED" : "NEW",
+          status: qrCode.status === "USED" ? "REDEEMED" : qrCode.status === "INVALID" ? "INVALID" : "NEW",
+          redemptionStoppedAt: qrCode.redemptionStoppedAt,
           imageUrl: qrCode.qrCodeUrl,
           usedAt: qrCode.usedAt,
           createdAt: qrCode.createdAt,

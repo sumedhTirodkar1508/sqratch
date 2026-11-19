@@ -9,6 +9,8 @@ import {
   validateLessonVideoStorageUrl,
 } from "@/lib/storage-upload";
 import { createSignedLessonVideoUrl } from "@/lib/lesson-video-playback";
+import { AssetUnavailableError, settleClaimedAssets } from "@/lib/staged-assets";
+import { deleteLessonReleasingVideo, saveLessonWithVideo } from "@/lib/lesson-video-lifecycle";
 import {
   resolveLessonVideoStorageReference,
   type LessonVideoStorageReference,
@@ -67,31 +69,11 @@ async function validateNewLessonVideoAsset(options: {
   return { ok: true as const, reference: parsed };
 }
 
-async function cleanupLessonVideo(
-  reference: LessonVideoStorageReference | null,
-  context: string,
-) {
-  if (!reference) {
-    return;
-  }
-
-  try {
-    const referenced = await prisma.lesson.count({ where: { videoStorageBucket: reference.bucket, videoStoragePath: reference.path } });
-    if (referenced > 0) return;
-    const legacyLessons = await prisma.lesson.findMany({
-      where: { videoUploadUrl: { not: null }, videoStorageBucket: null, videoStoragePath: null },
-      select: { videoUploadUrl: true, videoStorageBucket: true, videoStoragePath: true, courseId: true, course: { select: { experience: { select: { slug: true } } } } },
-    });
-    if (legacyLessons.some((lesson) => {
-      const other = resolveLessonVideoStorageReference({ lesson, courseId: lesson.courseId, experienceSlug: lesson.course.experience.slug });
-      return other?.bucket === reference.bucket && other.path === reference.path;
-    })) return;
-    const deleted = await deleteFileFromStorage(reference.bucket, reference.path);
-    if (!deleted) console.error(`[creator/lessons][${context}] Failed to delete lesson video object.`);
-  } catch (error) {
-    console.error(`[creator/lessons][${context}] Failed to clean up lesson video object.`, error);
-  }
-}
+const assetUnavailable = () =>
+  NextResponse.json(
+    { error: "The uploaded lesson video is no longer available. Please upload it again.", code: "ASSET_UNAVAILABLE" },
+    { status: 409 },
+  );
 
 export async function GET(request: NextRequest) {
   try {
@@ -335,7 +317,7 @@ export async function POST(request: NextRequest) {
         videoUploadUrl: null,
         videoStorageBucket: videoReference?.bucket || null,
         videoStoragePath: videoReference?.path || null,
-      });
+      }, creator.userId);
 
     return NextResponse.json(
       {
@@ -347,6 +329,7 @@ export async function POST(request: NextRequest) {
       { status: created ? 201 : 200 },
     );
   } catch (error) {
+    if (error instanceof AssetUnavailableError) return assetUnavailable();
     console.error("[creator/lessons][POST] Error:", error);
     return NextResponse.json(
       { error: "Failed to create lesson." },
@@ -446,11 +429,6 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "Lesson not found." }, { status: 404 });
     }
 
-    const oldReference = resolveLessonVideoStorageReference({
-      lesson: existing,
-      courseId: existing.courseId,
-      experienceSlug: existing.course.experience.slug,
-    });
     let videoReference: LessonVideoStorageReference | null = null;
 
     if (videoSource === "UPLOAD") {
@@ -472,8 +450,12 @@ export async function PATCH(request: NextRequest) {
       videoReference = validation.reference;
     }
 
-    const lesson = await prisma.lesson.update({
-      where: { id: existing.id },
+    const { lesson, claimedIds } = await saveLessonWithVideo(prisma, {
+      lessonId: existing.id,
+      courseId: existing.courseId,
+      experienceSlug: existing.course.experience.slug,
+      ownerUserId: creator.userId,
+      videoReference,
       data: {
         title,
         description: description || null,
@@ -481,33 +463,12 @@ export async function PATCH(request: NextRequest) {
         completionPointsReward: reward.value,
         videoSource,
         youtubeUrl: videoSource === "YOUTUBE" ? youtubeUrl : null,
-        videoUploadUrl: null,
-        videoStorageBucket: videoReference?.bucket || null,
-        videoStoragePath: videoReference?.path || null,
-      },
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        sortOrder: true,
-        completionPointsReward: true,
-        videoSource: true,
-        youtubeUrl: true,
-        videoUploadUrl: true,
-        videoStorageBucket: true,
-        videoStoragePath: true,
       },
     });
 
-    const storageObjectChanged =
-      oldReference &&
-      (!videoReference ||
-        oldReference.bucket !== videoReference.bucket ||
-        oldReference.path !== videoReference.path);
-
-    if (storageObjectChanged) {
-      await cleanupLessonVideo(oldReference, "PATCH");
-    }
+    await settleClaimedAssets(prisma, claimedIds, deleteFileFromStorage).catch(() =>
+      console.error("[creator/lessons][PATCH] Deferred lesson video cleanup."),
+    );
 
     return NextResponse.json({
       data: {
@@ -516,6 +477,7 @@ export async function PATCH(request: NextRequest) {
       },
     });
   } catch (error) {
+    if (error instanceof AssetUnavailableError) return assetUnavailable();
     console.error("[creator/lessons][PATCH] Error:", error);
     return NextResponse.json(
       { error: "Failed to update lesson." },
@@ -578,15 +540,16 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Lesson not found." }, { status: 404 });
     }
 
-    const videoReference = resolveLessonVideoStorageReference({
-      lesson,
+    const claimedIds = await deleteLessonReleasingVideo(prisma, {
+      lessonId: lesson.id,
       courseId: lesson.courseId,
       experienceSlug: lesson.course.experience.slug,
+      ownerUserId: creator.userId,
     });
 
-    await prisma.lesson.delete({ where: { id: lesson.id } });
-
-    await cleanupLessonVideo(videoReference, "DELETE");
+    await settleClaimedAssets(prisma, claimedIds, deleteFileFromStorage).catch(() =>
+      console.error("[creator/lessons][DELETE] Deferred lesson video cleanup."),
+    );
 
     return NextResponse.json({ data: { id: lesson.id } });
   } catch (error) {

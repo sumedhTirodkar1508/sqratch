@@ -14,6 +14,8 @@ import { PageCard } from "@/components/experience/experience-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { PartialResult } from "@/components/partial-result";
+import { snapshotOf, useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 type ExperienceFormData = {
   title: string;
@@ -24,6 +26,17 @@ type ExperienceFormData = {
   whyYoutubeUrl: string;
   whyVideoAssetUrl: string;
   status: "DRAFT" | "PUBLISHED";
+};
+
+const EMPTY_FORM: ExperienceFormData = {
+  title: "",
+  slug: "",
+  description: "",
+  coverImageUrl: "",
+  whyVideoSource: "",
+  whyYoutubeUrl: "",
+  whyVideoAssetUrl: "",
+  status: "DRAFT",
 };
 
 function slugifyValue(value: string) {
@@ -103,16 +116,11 @@ export function CreatorExperienceForm({
   experienceId?: string;
 }) {
   const router = useRouter();
-  const [form, setForm] = useState<ExperienceFormData>({
-    title: "",
-    slug: "",
-    description: "",
-    coverImageUrl: "",
-    whyVideoSource: "",
-    whyYoutubeUrl: "",
-    whyVideoAssetUrl: "",
-    status: "DRAFT",
-  });
+  const [form, setForm] = useState<ExperienceFormData>(EMPTY_FORM);
+  // Last loaded or saved values; the form is dirty when it differs from them.
+  const [baseline, setBaseline] = useState(() => snapshotOf(EMPTY_FORM));
+  const [coverFailure, setCoverFailure] = useState<string | null>(null);
+  const [retryingCover, setRetryingCover] = useState(false);
   const [slugTouched, setSlugTouched] = useState(false);
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
@@ -146,7 +154,7 @@ export function CreatorExperienceForm({
           status: "DRAFT" | "PUBLISHED";
         }>(`/api/creator/experiences/${experienceId}`);
 
-        setForm({
+        const loaded: ExperienceFormData = {
           title: data.title,
           slug: data.slug,
           description: data.description || "",
@@ -155,7 +163,9 @@ export function CreatorExperienceForm({
           whyYoutubeUrl: data.whyYoutubeUrl || "",
           whyVideoAssetUrl: data.whyVideoUploadUrl || "",
           status: data.status,
-        });
+        };
+        setForm(loaded);
+        setBaseline(snapshotOf(loaded));
         setSlugTouched(true);
       } catch (loadError) {
         setError(getErrorMessage(loadError, "Failed to load experience."));
@@ -175,6 +185,11 @@ export function CreatorExperienceForm({
     };
   }, [coverPreview]);
 
+  useUnsavedChanges(
+    !loading &&
+      (snapshotOf(form) !== baseline || pendingCoverFile !== null || pendingWhyVideoFile !== null),
+  );
+
   const submitLabel = useMemo(
     () =>
       saving
@@ -187,12 +202,56 @@ export function CreatorExperienceForm({
     [mode, saving],
   );
 
+  async function uploadPendingCover(targetExperienceId: string) {
+    if (!pendingCoverFile) return;
+    const coverFormData = new FormData();
+    coverFormData.append("file", pendingCoverFile);
+
+    const coverResult = await fetchJson<{ fileUrl: string }>(
+      `/api/creator/experiences/${targetExperienceId}/cover`,
+      {
+        method: "POST",
+        body: coverFormData,
+      },
+    );
+
+    setForm((current) => ({
+      ...current,
+      coverImageUrl: coverResult.fileUrl,
+    }));
+    setBaseline((current) => {
+      const saved = JSON.parse(current) as ExperienceFormData;
+      return snapshotOf({ ...saved, coverImageUrl: coverResult.fileUrl });
+    });
+    setPendingCoverFile(null);
+    setCoverFailure(null);
+    if (coverPreview) {
+      URL.revokeObjectURL(coverPreview);
+      setCoverPreview(null);
+    }
+  }
+
+  async function retryCoverUpload() {
+    if (!experienceId || !pendingCoverFile || retryingCover || saving) return;
+    setRetryingCover(true);
+    try {
+      await uploadPendingCover(experienceId);
+      router.push("/dashboard/creator/experiences");
+    } catch (retryError) {
+      setCoverFailure(getErrorMessage(retryError, "Failed to upload the cover image."));
+    } finally {
+      setRetryingCover(false);
+    }
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setError(null);
+    setCoverFailure(null);
 
     let detailsSaved = false;
+    let coverAttempted = false;
     let whyVideoAssetUrl = form.whyVideoAssetUrl.trim();
     let uploadedWhyVideoAssetUrl: string | null = null;
 
@@ -237,31 +296,14 @@ export function CreatorExperienceForm({
         }),
       });
       detailsSaved = true;
+      setBaseline(snapshotOf(form));
 
       const targetExperienceId =
         mode === "create" ? result.id : experienceId || result.id;
 
       if (pendingCoverFile && targetExperienceId) {
-        const coverFormData = new FormData();
-        coverFormData.append("file", pendingCoverFile);
-
-        const coverResult = await fetchJson<{ fileUrl: string }>(
-          `/api/creator/experiences/${targetExperienceId}/cover`,
-          {
-            method: "POST",
-            body: coverFormData,
-          },
-        );
-
-        setForm((current) => ({
-          ...current,
-          coverImageUrl: coverResult.fileUrl,
-        }));
-        setPendingCoverFile(null);
-        if (coverPreview) {
-          URL.revokeObjectURL(coverPreview);
-          setCoverPreview(null);
-        }
+        coverAttempted = true;
+        await uploadPendingCover(targetExperienceId);
       }
 
       setPendingWhyVideoFile(null);
@@ -279,6 +321,11 @@ export function CreatorExperienceForm({
       if (uploadedWhyVideoAssetUrl && !isDefiniteSaveRejection(submitError)) {
         setForm((current) => ({ ...current, whyVideoAssetUrl: uploadedWhyVideoAssetUrl! }));
         setPendingWhyVideoFile(null);
+      }
+      if (detailsSaved && coverAttempted) {
+        // Details are saved; only the cover failed. Keep the form and the chosen file.
+        setCoverFailure(getErrorMessage(submitError, "The cover upload failed."));
+        return;
       }
       setError(
         detailsSaved
@@ -569,6 +616,16 @@ export function CreatorExperienceForm({
             </div>
 
             {error && <p className="text-sm text-red-700 dark:text-red-300">{error}</p>}
+            {coverFailure ? (
+              <PartialResult
+                saved="Experience details"
+                failed="Cover image"
+                reason={coverFailure}
+                retryLabel="Retry cover upload"
+                retrying={retryingCover}
+                onRetry={() => void retryCoverUpload()}
+              />
+            ) : null}
 
             <Button
               type="submit"

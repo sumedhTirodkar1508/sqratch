@@ -4,9 +4,11 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { fetchJson, getErrorMessage } from "@/components/experience/client-utils";
 import { ExperienceShell, GatePanel, LoadingView, ErrorView, PageCard } from "@/components/experience/experience-shell";
 import { useExperience } from "@/components/experience/use-experience";
+import { ConfirmDestructive } from "@/components/confirm-destructive";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 type PostsResponse = {
   experience: {
@@ -60,6 +62,7 @@ function PostCard({
   const [commentDeletingId, setCommentDeletingId] = useState<string | null>(null);
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
+  useUnsavedChanges(commentDraft.trim().length > 0);
 
   // The in-flight flag is a ref, not state: two clicks in the same tick both
   // see the same stale state, so only a ref guarantees one request at a time.
@@ -196,15 +199,22 @@ function PostCard({
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-medium">{comment.user.name}</p>
                   {comment.canDelete && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void deleteComment(comment.id)}
-                      disabled={commentDeletingId === comment.id}
-                      className="h-7 rounded-full border-red-200/50 bg-transparent px-3 text-xs text-red-700 dark:text-red-100 hover:bg-red-500/10"
-                    >
-                      {commentDeletingId === comment.id ? "Deleting..." : "Delete"}
-                    </Button>
+                    <ConfirmDestructive
+                      title={`Delete ${comment.user.name}'s comment?`}
+                      description="The comment is removed for everyone. This cannot be undone."
+                      confirmLabel="Delete comment"
+                      onConfirm={() => deleteComment(comment.id)}
+                      trigger={
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={commentDeletingId === comment.id}
+                          className="h-7 rounded-full border-red-200/50 bg-transparent px-3 text-xs text-red-700 dark:text-red-100 hover:bg-red-500/10"
+                        >
+                          {commentDeletingId === comment.id ? "Deleting..." : "Delete"}
+                        </Button>
+                      }
+                    />
                   )}
                 </div>
                 <p className="text-xs text-copy-45">
@@ -250,6 +260,8 @@ export function ExperiencePostsClient({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [saving, setSaving] = useState(false);
+  // The post draft is dirty while it holds text that has not been published.
+  useUnsavedChanges(title.trim().length > 0 || body.trim().length > 0);
 
   useEffect(() => {
     if (!data?.canInteract) {
@@ -290,6 +302,14 @@ export function ExperiencePostsClient({
 
       setTitle("");
       setBody("");
+    } catch (error) {
+      // The draft stays in the form so the author can retry.
+      setPostsError(getErrorMessage(error, "Failed to create post."));
+      setSaving(false);
+      return;
+    }
+
+    try {
       await Promise.all([
         reload(),
         fetchJson<PostsResponse>(`/api/posts?experienceSlug=${experienceSlug}`).then(
@@ -297,7 +317,9 @@ export function ExperiencePostsClient({
         ),
       ]);
     } catch (error) {
-      setPostsError(getErrorMessage(error, "Failed to create post."));
+      setPostsError(
+        getErrorMessage(error, "Your post was published, but the feed could not be refreshed. Reload the page."),
+      );
     } finally {
       setSaving(false);
     }

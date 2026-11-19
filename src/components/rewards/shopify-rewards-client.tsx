@@ -118,6 +118,18 @@ function isUsable(status: ShopifyRewardRedemption["status"]) {
   return status === "ISSUED";
 }
 
+const REDEMPTION_PAGE_SIZE = 25;
+
+/** One bounded page of this customer's redemptions; `nextCursor` is null on the last page. */
+async function fetchRedemptionPage(cursor: string | null) {
+  const params = new URLSearchParams({ limit: String(REDEMPTION_PAGE_SIZE) });
+  if (cursor) params.set("cursor", cursor);
+  const response = await fetch(`/api/rewards/shopify/redemptions?${params}`, { credentials: "include" });
+  const json = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(json?.error || "Failed to load reward redemptions.");
+  return { redemptions: (json?.data ?? []) as ShopifyRewardRedemption[], nextCursor: (json?.pagination?.nextCursor ?? null) as string | null };
+}
+
 export function ShopifyRewardsClient({
   currentPoints,
 }: {
@@ -126,6 +138,8 @@ export function ShopifyRewardsClient({
   const router = useRouter();
   const [offers, setOffers] = useState<ShopifyRewardOffer[]>([]);
   const [redemptions, setRedemptions] = useState<ShopifyRewardRedemption[]>([]);
+  const [redemptionCursor, setRedemptionCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [redeemingOfferId, setRedeemingOfferId] = useState<string | null>(null);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
@@ -147,12 +161,13 @@ export function ShopifyRewardsClient({
     setError(null);
 
     try {
-      const [offerData, redemptionData] = await Promise.all([
+      const [offerData, page] = await Promise.all([
         fetchJson<ShopifyRewardOffer[]>("/api/rewards/shopify"),
-        fetchJson<ShopifyRewardRedemption[]>("/api/rewards/shopify/redemptions"),
+        fetchRedemptionPage(null),
       ]);
       setOffers(offerData);
-      setRedemptions(redemptionData);
+      setRedemptions(page.redemptions);
+      setRedemptionCursor(page.nextCursor);
     } catch (loadError) {
       setError(getErrorMessage(loadError, "Failed to load Shopify rewards."));
     } finally {
@@ -163,6 +178,21 @@ export function ShopifyRewardsClient({
   useEffect(() => {
     void loadRewards();
   }, []);
+
+  async function loadMoreRedemptions() {
+    if (!redemptionCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const page = await fetchRedemptionPage(redemptionCursor);
+      setRedemptions((current) => [...current, ...page.redemptions.filter((next) => !current.some((existing) => existing.id === next.id))]);
+      setRedemptionCursor(page.nextCursor);
+    } catch (moreError) {
+      setError(getErrorMessage(moreError, "Failed to load more reward redemptions."));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function copyCode(code: string) {
     await navigator.clipboard.writeText(code);
@@ -522,6 +552,17 @@ export function ShopifyRewardsClient({
               ))
             )}
           </div>
+          {redemptionCursor ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loadingMore}
+              onClick={() => void loadMoreRedemptions()}
+              className="mt-4 rounded-full border-edge/20 bg-transparent text-ink hover:bg-glass-10"
+            >
+              {loadingMore ? "Loading..." : "Load more redemptions"}
+            </Button>
+          ) : null}
         </CardContent>
       </Card>
     </div>

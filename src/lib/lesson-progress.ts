@@ -9,6 +9,7 @@ export type LessonProgressSnapshot = {
   lessonId: string;
   lastPositionSeconds: number;
   isCompleted: boolean;
+  completedAt: Date | null;
   updatedAt: Date;
 };
 
@@ -16,6 +17,7 @@ const SNAPSHOT_SELECT = {
   lessonId: true,
   lastPositionSeconds: true,
   isCompleted: true,
+  completedAt: true,
   updatedAt: true,
 } as const;
 
@@ -33,17 +35,26 @@ function ownerWhere(owner: LessonProgressOwner, lessonId: string) {
  * statement is conditional and atomic, two concurrent writers (a progress save
  * and an anonymous transfer, or two transfers) cannot lose each other's update,
  * which a read-then-write `max()` cannot guarantee.
+ *
+ * `completedAt` is written exactly once, by the statement that flips
+ * `isCompleted` from false to true (that statement's `isCompleted: false`
+ * condition makes it set-once under concurrency). A sign-in transfer passes the
+ * anonymous row's own `completedAt`; the earliest KNOWN time wins, and a row with
+ * no recorded time is never given a made-up one.
  */
 export async function raiseLessonProgress(
   db: Db,
   owner: LessonProgressOwner,
-  input: { lessonId: string; lastPositionSeconds: number; isCompleted: boolean },
+  input: { lessonId: string; lastPositionSeconds: number; isCompleted: boolean; completedAt?: Date | null },
 ): Promise<LessonProgressSnapshot> {
   const position = Math.max(0, Math.floor(Number.isFinite(input.lastPositionSeconds) ? input.lastPositionSeconds : 0));
   const where = ownerWhere(owner, input.lessonId);
+  // A transfer carries the source row's time (possibly null = unknown); a fresh save is "now".
+  const completionTime = (): Date | null =>
+    input.isCompleted ? (input.completedAt === undefined ? new Date() : input.completedAt) : null;
 
   await db.lessonProgress.createMany({
-    data: [{ ...where, lastPositionSeconds: position, isCompleted: input.isCompleted }],
+    data: [{ ...where, lastPositionSeconds: position, isCompleted: input.isCompleted, completedAt: completionTime() }],
     skipDuplicates: true,
   });
   if (position > 0) {
@@ -53,10 +64,20 @@ export async function raiseLessonProgress(
     });
   }
   if (input.isCompleted) {
+    // The `isCompleted: false` condition is what makes completedAt set-once.
     await db.lessonProgress.updateMany({
       where: { ...where, isCompleted: false },
-      data: { isCompleted: true },
+      data: { isCompleted: true, completedAt: completionTime() },
     });
+    // Transfer only: if the existing row has a LATER known time, take the earlier one. A row
+    // whose time is unknown (completed before the column existed) stays unknown: a later
+    // anonymous completion must not give it a made-up date.
+    if (input.completedAt) {
+      await db.lessonProgress.updateMany({
+        where: { ...where, isCompleted: true, completedAt: { gt: input.completedAt } },
+        data: { completedAt: input.completedAt },
+      });
+    }
   }
 
   const row = await db.lessonProgress.findFirst({ where, select: SNAPSHOT_SELECT });
@@ -68,7 +89,7 @@ export async function raiseLessonProgress(
   // Never report a save that was not stored.
   if ("sessionId" in owner) {
     await db.lessonProgress.createMany({
-      data: [{ ...where, lastPositionSeconds: position, isCompleted: input.isCompleted }],
+      data: [{ ...where, lastPositionSeconds: position, isCompleted: input.isCompleted, completedAt: completionTime() }],
       skipDuplicates: true,
     });
     const recreated = await db.lessonProgress.findFirst({ where, select: SNAPSHOT_SELECT });

@@ -466,6 +466,65 @@ export async function getActiveCommerceConnectionsForBrands(
   return result;
 }
 
+/** Dependencies for `getAllCommerceConnectionsForBrands` — one provider-agnostic query. */
+export type AllConnectionsForBrandsDeps = {
+  /** Loads every `CommerceConnection` row (ALL providers) for ALL of `brandIds` at once. */
+  findAllConnectionRowsForBrands(
+    brandIds: string[],
+  ): Promise<CommerceConnectionRow[]>;
+};
+
+async function defaultFindAllConnectionRowsForBrands(
+  brandIds: string[],
+): Promise<CommerceConnectionRow[]> {
+  const prisma = await getPrisma();
+  return prisma.commerceConnection.findMany({
+    where: { brandId: { in: brandIds } },
+    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }, { id: "asc" }],
+    select: CONNECTION_ROW_SELECT,
+  });
+}
+
+/**
+ * Every canonical connection (all providers, all statuses) for MANY brands in
+ * exactly ONE query — for admin audit listings that must show provider and
+ * status per connection, not just the single preferred row. Unlike
+ * `getActiveCommerceConnectionsForBrands` this applies no preference and no
+ * provider filter. Never N+1.
+ *
+ * Failure is surfaced (`complete: false`, empty map) rather than being turned
+ * into "no connections": an audit view must not claim a brand is unconnected
+ * when the read merely failed.
+ */
+export async function getAllCommerceConnectionsForBrands(
+  brandIds: string[],
+  deps: Partial<AllConnectionsForBrandsDeps> = {},
+): Promise<{
+  byBrand: Map<string, CommerceConnectionSummary[]>;
+  complete: boolean;
+}> {
+  const byBrand = new Map<string, CommerceConnectionSummary[]>();
+  const uniqueBrandIds = [...new Set(brandIds)];
+  if (uniqueBrandIds.length === 0) return { byBrand, complete: true };
+
+  const find =
+    deps.findAllConnectionRowsForBrands ?? defaultFindAllConnectionRowsForBrands;
+  let rows: CommerceConnectionRow[];
+  try {
+    rows = await find(uniqueBrandIds);
+  } catch {
+    return { byBrand, complete: false };
+  }
+
+  for (const row of rows) {
+    const summary = mapCommerceConnectionToSummary(row);
+    const existing = byBrand.get(row.brandId);
+    if (existing) existing.push(summary);
+    else byBrand.set(row.brandId, [summary]);
+  }
+  return { byBrand, complete: true };
+}
+
 /**
  * PHASE 14B.4C: records a freshly-learned currency code onto the canonical
  * connection's `providerMetadata` — the exact same key

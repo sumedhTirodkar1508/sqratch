@@ -139,7 +139,13 @@ WHERE "id" = :reviewed_job_id
 
 ## Rate Limiting
 
-The current limiter is a bounded, in-memory best-effort fallback. It is not deployment-wide on Vercel. No durable Redis/KV service is configured in this repository. Before high-volume campaigns, provision an approved shared limiter and preserve fail-open behavior for QR scans while using stricter behavior for account/email and OAuth endpoints.
+The default limiter is a bounded in-memory best-effort limiter, per server instance. Credential sign-in (attempts counted before the password check: 10 per account and address, 100 per account alone and 60 per address per 15 minutes; a successful sign-in clears the account-and-address counter; the answer is the generic wrong-password answer with unchanged bcrypt work), sign-up, verification resend and password recovery can instead be enforced across instances through PostgreSQL:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `RATE_LIMIT_STORE` | unset (in-memory) | `postgres` uses the `RateLimitCounter` table (migration `20261117150000_add_rate_limit_counter`, additive) for those endpoints only. If the table is missing or the database is unreachable the limiter falls back to memory; it never blocks a request because the limiter itself failed. |
+
+QR scans, analytics collection, waitlist and Shopify OAuth start stay in memory on purpose (hot or low-risk paths). Apply the migration before setting the variable. The sign-in throttle takes the client address from `x-vercel-forwarded-for` or `x-real-ip` only when `VERCEL` is set (the platform overwrites them) and otherwise from the LAST `x-forwarded-for` hop; the per-account ceiling counts only attempts that passed the per-address limits; sign-up, resend and recovery limits still read the first `x-forwarded-for` entry, which is only trustworthy behind a proxy that overwrites the header (Vercel does). No Redis/KV service is configured or needed at the current scale.
 
 ## Authentication hardening
 

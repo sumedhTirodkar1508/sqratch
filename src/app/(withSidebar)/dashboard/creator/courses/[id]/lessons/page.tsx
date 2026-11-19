@@ -5,6 +5,7 @@ import {
   use,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -20,6 +21,8 @@ import {
   fetchJson,
   getErrorMessage,
 } from "@/components/experience/client-utils";
+import { ConfirmDestructive } from "@/components/confirm-destructive";
+import { snapshotOf, useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 import { PageCard } from "@/components/experience/experience-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -94,6 +97,11 @@ const emptyLessonDraft: LessonDraft = {
   file: null,
 };
 
+// Dirty = differs from the last loaded/saved values, or a video file is chosen but not uploaded yet.
+function isLessonDraftDirty(draft: LessonDraft, saved: LessonDraft) {
+  return draft.file !== null || snapshotOf({ ...draft, file: null }) !== snapshotOf({ ...saved, file: null });
+}
+
 function formatFileSize(bytes: number) {
   return `${new Intl.NumberFormat(undefined, {
     maximumFractionDigits: 1,
@@ -133,6 +141,7 @@ export default function CreatorCourseLessonsPage({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [operation, setOperation] = useState<LessonOperation | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useUnsavedChanges(isLessonDraftDirty(draft, emptyLessonDraft));
   const uploadAbortControllerRef = useRef<AbortController | null>(null);
   const submissionInFlightRef = useRef(false);
 
@@ -326,14 +335,6 @@ export default function CreatorCourseLessonsPage({
       return;
     }
 
-    const confirmed = window.confirm(
-      "Delete this lesson? This cannot be undone.",
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
     submissionInFlightRef.current = true;
     setDeletingId(lessonId);
     setError(null);
@@ -441,21 +442,10 @@ function EditableLessonCard({
   onCancelUpload: () => void;
   onValidationError: (message: string | null) => void;
 }) {
-  const [draft, setDraft] = useState<LessonDraft>({
-    title: lesson.title,
-    description: lesson.description || "",
-    sortOrder: lesson.sortOrder,
-    completionPointsReward: lesson.completionPointsReward,
-    videoSource: lesson.videoSource,
-    youtubeUrl: lesson.youtubeUrl || "",
-    videoAssetUrl: lesson.videoAssetUrl || "",
-    videoStorageBucket: lesson.videoStorageBucket || "",
-    videoStoragePath: lesson.videoStoragePath || "",
-    file: null,
-  });
-
-  useEffect(() => {
-    setDraft({
+  // Keyed on the saved values (not the lesson object) so reloading the list after
+  // another card changes does not wipe this card's unsaved edits.
+  const savedDraft = useMemo<LessonDraft>(
+    () => ({
       title: lesson.title,
       description: lesson.description || "",
       sortOrder: lesson.sortOrder,
@@ -466,8 +456,26 @@ function EditableLessonCard({
       videoStorageBucket: lesson.videoStorageBucket || "",
       videoStoragePath: lesson.videoStoragePath || "",
       file: null,
-    });
-  }, [lesson]);
+    }),
+    [
+      lesson.title,
+      lesson.description,
+      lesson.sortOrder,
+      lesson.completionPointsReward,
+      lesson.videoSource,
+      lesson.youtubeUrl,
+      lesson.videoAssetUrl,
+      lesson.videoStorageBucket,
+      lesson.videoStoragePath,
+    ],
+  );
+  const [draft, setDraft] = useState<LessonDraft>(savedDraft);
+
+  useEffect(() => {
+    setDraft(savedDraft);
+  }, [savedDraft]);
+
+  useUnsavedChanges(isLessonDraftDirty(draft, savedDraft));
 
   return (
     <PageCard>
@@ -482,15 +490,22 @@ function EditableLessonCard({
           onCancelUpload={onCancelUpload}
           onValidationError={onValidationError}
           secondaryAction={
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void onDelete(lesson.id)}
-              disabled={disabled}
-              className="rounded-full border-red-400/45 bg-red-500/10 px-4 text-red-700 dark:text-red-200 hover:border-red-300/70 hover:bg-red-500/20 hover:text-red-100 sm:px-6"
-            >
-              {deleting ? "Deleting..." : "Delete lesson"}
-            </Button>
+            <ConfirmDestructive
+              title={`Delete lesson "${lesson.title}"?`}
+              description="This removes the lesson and its uploaded video. This cannot be undone."
+              confirmLabel="Delete lesson"
+              onConfirm={() => onDelete(lesson.id)}
+              trigger={
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={disabled}
+                  className="rounded-full border-red-400/45 bg-red-500/10 px-4 text-red-700 dark:text-red-200 hover:border-red-300/70 hover:bg-red-500/20 hover:text-red-100 sm:px-6"
+                >
+                  {deleting ? "Deleting..." : "Delete lesson"}
+                </Button>
+              }
+            />
           }
         />
         <LessonProductLinksSection

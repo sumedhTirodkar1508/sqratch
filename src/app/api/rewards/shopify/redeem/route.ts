@@ -35,6 +35,7 @@ import {
   UnsupportedCapabilityError,
   UnsupportedProviderError,
 } from "@/lib/commerce/errors";
+import { isUniqueViolationOn } from "@/lib/prisma-errors";
 import type { CommerceAdapterRegistry } from "@/lib/commerce/registry";
 import type {
   CommerceConnectionSummary,
@@ -806,17 +807,16 @@ export async function redeemImpl(
         // A P2002 on `idempotencyKey` means a concurrent request already
         // committed a row for this key — do NOT retry; fall through to the
         // concurrent-existing lookup so that row can be returned to the caller.
+        // The driver adapter does not fill `meta.target`; isUniqueViolationOn reads
+        // the violated constraint from wherever the runtime puts it.
         if (
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2002"
+          isUniqueViolationOn(error, "code") &&
+          !isUniqueViolationOn(error, "idempotencyKey")
         ) {
-          const target = (error.meta?.target as string[] | undefined) ?? [];
-          if (target.includes("code") && !target.includes("idempotencyKey")) {
-            // Code collision — safe to retry because the Serializable TX rolled
-            // back fully: no debit or PointTransaction was persisted.
-            lastError = error;
-            continue;
-          }
+          // Code collision — safe to retry because the Serializable TX rolled
+          // back fully: no debit or PointTransaction was persisted.
+          lastError = error;
+          continue;
         }
 
         // For every other error (known domain errors, P2034 serialization

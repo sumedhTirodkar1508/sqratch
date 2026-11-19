@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { CommerceProvider } from "@prisma/client";
 import { getAdminContext } from "@/lib/admin-auth";
 import prisma from "@/lib/prisma";
-import { getActiveCommerceConnectionsForBrands } from "@/lib/commerce/connection-service";
+import {
+  getActiveCommerceConnectionsForBrands,
+  getAllCommerceConnectionsForBrands,
+} from "@/lib/commerce/connection-service";
 
 export async function GET() {
   try {
@@ -57,15 +60,28 @@ export async function GET() {
 
     // CANONICAL — one batched CommerceConnection query for every brand in
     // this list, never one query per brand (see connection-service.ts).
-    const connectionsByBrand = await getActiveCommerceConnectionsForBrands(
-      brands.map((brand) => brand.id),
-      CommerceProvider.SHOPIFY,
-    );
+    const brandIds = brands.map((brand) => brand.id);
+    const [connectionsByBrand, allConnections] = await Promise.all([
+      getActiveCommerceConnectionsForBrands(brandIds, CommerceProvider.SHOPIFY),
+      getAllCommerceConnectionsForBrands(brandIds),
+    ]);
 
     return NextResponse.json({
       data: brands.map((brand) => ({
         ...brand,
         shopifyShopDomain: connectionsByBrand.get(brand.id)?.externalAccountId ?? null,
+        connectionsComplete: allConnections.complete,
+        connections: (allConnections.byBrand.get(brand.id) ?? []).map(
+          (connection) => ({
+            id: connection.id,
+            provider: connection.provider,
+            status: connection.status,
+            isPrimary: connection.isPrimary,
+            externalAccountLabel:
+              connection.displayName || connection.externalAccountId,
+            externalAccountId: connection.externalAccountId,
+          }),
+        ),
       })),
     });
   } catch (error) {

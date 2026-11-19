@@ -38,6 +38,7 @@ model User {
   qrCodesCreated            QRCode[]                   @relation("QRCodeCreatedByUser")
   qrRedemptions             QRCode[]                   @relation("QRCodeRedeemedByUser")
   archivedQrBatches         QRCodeBatch[]              @relation("QRCodeBatchArchivedBy")
+  stoppedQrBatches          QRCodeBatch[]              @relation("QRCodeBatchRedemptionStoppedBy")
   questions                 Question[]
   questionAnswers           QuestionAnswer[]
   commerceRewardRedemptions CommerceRewardRedemption[]
@@ -175,9 +176,14 @@ model QRCodeBatch {
   /// deliberately separate from `isActive` and from any redemption stop.
   archivedAt    DateTime?
   archivedById  String?
+  /// Stops NEW redemptions of this batch's codes. Distinct from archiving (list
+  /// visibility) and deletion (only for unused codes). Never rewrites history.
+  redemptionStoppedAt   DateTime?
+  redemptionStoppedById String?
   qrCodes       QRCode[]
   campaign      Campaign? @relation(fields: [campaignId], references: [id])
   archivedBy    User?     @relation("QRCodeBatchArchivedBy", fields: [archivedById], references: [id], onDelete: SetNull)
+  redemptionStoppedBy User? @relation("QRCodeBatchRedemptionStoppedBy", fields: [redemptionStoppedById], references: [id], onDelete: SetNull)
 
   @@index([campaignId])
 }
@@ -196,6 +202,9 @@ model QRCode {
   createdById               String
   isActive                  Boolean                    @default(true)
   batchId                   String?
+  /// While set on a NEW code, no new unlock or point may come from it. USED codes
+  /// and existing unlocks are never changed by a stop.
+  redemptionStoppedAt       DateTime?
   analyticsEvents           AnalyticsEvent[]
   unlocks                   CampaignUnlock[]
   pointTransactions         PointTransaction[]
@@ -323,6 +332,9 @@ model LessonProgress {
   userId              String?
   lessonId            String
   isCompleted         Boolean      @default(false)
+  /// Set once, in the write that first turns `isCompleted` true; never updated by
+  /// later saves. Null on rows completed before this column existed (not backfilled).
+  completedAt         DateTime?
   lastPositionSeconds Int          @default(0)
   updatedAt           DateTime     @updatedAt
   createdAt           DateTime     @default(now())
@@ -1793,4 +1805,48 @@ enum RewardProvisioningState {
   MANUAL_REVIEW
   FAILED_FINAL
   REVOKED
+}
+
+enum StagedAssetStatus {
+  STAGED
+  ATTACHED
+  CLEANUP_CLAIMED
+  DELETED
+}
+
+/// Ownership record for an uploaded lesson-video object. Attachment and cleanup
+/// compete for this one row with conditional updates, so an attached object is
+/// never deleted and a claimed object is never attached. No foreign keys on
+/// purpose: the row must outlive the lesson, course or user it described until
+/// the object is gone from storage.
+model StagedAsset {
+  id               String            @id @default(cuid())
+  bucket           String
+  path             String
+  kind             String            @default("LESSON_VIDEO")
+  ownerUserId      String
+  courseId         String
+  lessonId         String?
+  status           StagedAssetStatus @default(STAGED)
+  createdAt        DateTime          @default(now())
+  attachedAt       DateTime?
+  cleanupClaimedAt DateTime?
+  deletedAt        DateTime?
+  attempts         Int               @default(0)
+  lastError        String?
+
+  @@unique([bucket, path])
+  @@index([status, createdAt])
+  @@index([lessonId])
+}
+
+/// Deployment-wide rate-limit counters, used only when RATE_LIMIT_STORE=postgres.
+/// One row per key (hashed identifiers, never raw emails). Rows are replaced when
+/// their window expires and pruned opportunistically.
+model RateLimitCounter {
+  key     String   @id
+  count   Int
+  resetAt DateTime
+
+  @@index([resetAt])
 }

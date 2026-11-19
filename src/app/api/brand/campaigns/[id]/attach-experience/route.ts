@@ -6,8 +6,86 @@ import {
   getOwnedBrandCampaign,
 } from "@/lib/brand-auth";
 import prisma from "@/lib/prisma";
+import { publicDisplayName } from "@/lib/display-name";
 
 const MAX_SORT_ORDER = 1_000_000;
+const DISCOVER_DEFAULT_LIMIT = 24;
+const DISCOVER_MAX_LIMIT = 50;
+
+type DiscoverCursor = { updatedAt: Date; id: string };
+
+function encodeDiscoverCursor(row: { updatedAt: Date; id: string }) {
+  return Buffer.from(
+    JSON.stringify({ u: row.updatedAt.toISOString(), id: row.id }),
+  ).toString("base64url");
+}
+
+function decodeDiscoverCursor(value: string | null): DiscoverCursor | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    const updatedAt = new Date(parsed?.u);
+    if (
+      typeof parsed?.id !== "string" ||
+      !parsed.id ||
+      Number.isNaN(updatedAt.getTime())
+    ) {
+      return null;
+    }
+    return { updatedAt, id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
+function parseDiscoverLimit(value: string | null): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isInteger(parsed) || parsed < 1) return DISCOVER_DEFAULT_LIMIT;
+  return Math.min(parsed, DISCOVER_MAX_LIMIT);
+}
+
+const experienceSelect = {
+  id: true,
+  title: true,
+  slug: true,
+  description: true,
+  isActive: true,
+  updatedAt: true,
+  creator: {
+    select: {
+      displayName: true,
+      user: { select: { name: true } },
+    },
+  },
+} as const;
+
+type ExperienceRow = {
+  id: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  isActive: boolean;
+  creator?: {
+    displayName: string | null;
+    user?: { name: string | null } | null;
+  } | null;
+};
+
+function creatorDisplayName(row: ExperienceRow): string {
+  const profileName = row.creator?.displayName?.trim();
+  return profileName || publicDisplayName({ name: row.creator?.user?.name });
+}
+
+function toExperienceView(row: ExperienceRow) {
+  return {
+    id: row.id,
+    title: row.title,
+    slug: row.slug,
+    description: row.description,
+    status: row.isActive ? ("PUBLISHED" as const) : ("DRAFT" as const),
+    creatorName: creatorDisplayName(row),
+  };
+}
 
 /**
  * Bounds CampaignExperience.sortOrder to the same closed range this repo uses
@@ -60,34 +138,73 @@ export async function GET(
       );
     }
 
+    const cursorParam = request.nextUrl.searchParams.get("cursor");
+    const cursor = decodeDiscoverCursor(cursorParam);
+    if (cursorParam && !cursor) {
+      return NextResponse.json({ error: "Invalid cursor." }, { status: 400 });
+    }
+    const limit = parseDiscoverLimit(request.nextUrl.searchParams.get("limit"));
+    const search = q
+      ? [
+          {
+            OR: [
+              { title: { contains: q, mode: "insensitive" as const } },
+              { slug: { contains: q, mode: "insensitive" as const } },
+            ],
+          },
+        ]
+      : [];
+
     const attachedRows = await prisma.campaignExperience.findMany({
       where: {
         campaignId: campaign.id,
       },
-      orderBy: { sortOrder: "asc" },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
       select: {
         experienceId: true,
         sortOrder: true,
+        experience: { select: experienceSelect },
       },
     });
 
     const attachedIds = new Set(attachedRows.map((row) => row.experienceId));
+    const discoverRows = await prisma.experience.findMany({
+      where: {
+        AND: [
+          { isActive: true },
+          { campaigns: { none: { campaignId: campaign.id } } },
+          ...search,
+          ...(cursor
+            ? [
+                {
+                  OR: [
+                    { updatedAt: { lt: cursor.updatedAt } },
+                    { updatedAt: cursor.updatedAt, id: { lt: cursor.id } },
+                  ],
+                },
+              ]
+            : []),
+        ],
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      select: experienceSelect,
+    });
+    const hasNextPage = discoverRows.length > limit;
+    const discoverPage = hasNextPage
+      ? discoverRows.slice(0, limit)
+      : discoverRows;
+    const lastDiscover = discoverPage[discoverPage.length - 1];
+
+    // Deprecated: the pre-split list (attached drafts plus the newest 50 other
+    // published experiences). Kept until every client reads attached/discover.
     const experiences = await prisma.experience.findMany({
       where: {
         AND: [
           {
             OR: [{ isActive: true }, { id: { in: Array.from(attachedIds) } }],
           },
-          ...(q
-            ? [
-                {
-                  OR: [
-                    { title: { contains: q, mode: "insensitive" as const } },
-                    { slug: { contains: q, mode: "insensitive" as const } },
-                  ],
-                },
-              ]
-            : []),
+          ...search,
         ],
       },
       orderBy: { updatedAt: "desc" },
@@ -104,6 +221,21 @@ export async function GET(
     return NextResponse.json({
       data: {
         campaign,
+        attached: attachedRows.map((row) => ({
+          ...toExperienceView(row.experience),
+          sortOrder: row.sortOrder,
+        })),
+        discover: {
+          items: discoverPage.map(toExperienceView),
+          meta: {
+            hasNextPage,
+            nextCursor:
+              hasNextPage && lastDiscover
+                ? encodeDiscoverCursor(lastDiscover)
+                : null,
+            limit,
+          },
+        },
         experiences: experiences.map((experience) => ({
           id: experience.id,
           title: experience.title,

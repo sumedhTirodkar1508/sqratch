@@ -1,3 +1,4 @@
+import * as qaCapacity from "../src/lib/qa-capacity";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
@@ -16,6 +17,7 @@ function load(file: string, db: object, userId: string) {
     "@/lib/experience-access": { getViewerContext: async () => access.viewer, getExperienceAccessContext: async () => access, isExperienceVisibleToViewer: (experience: { isActive: boolean; creator: { userId: string } }, id: string) => experience.isActive || experience.creator.userId === id },
     "@/lib/brand-context": { resolveActiveBrandContext: async () => null },
     "@/lib/prisma": { __esModule: true, default: db },
+    "@/lib/qa-capacity": qaCapacity,
   };
   const source = ts.transpileModule(readFileSync(file, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
   runInNewContext(source, { exports, require: (id: string) => { if (!(id in modules)) throw new Error(`Unexpected dependency ${id}`); return modules[id]; }, console, Date });

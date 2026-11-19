@@ -14,6 +14,21 @@ type BrandListItem = {
   logoUrl: string | null;
   isActive: boolean;
   shopifyShopDomain: string | null;
+  connectionsComplete?: boolean;
+  connections?: Array<{
+    id: string;
+    provider: "SHOPIFY" | "COMMERCE7";
+    status:
+      | "PENDING"
+      | "CONNECTED"
+      | "REQUIRES_RECONNECT"
+      | "DISCONNECTED"
+      | "UNINSTALLED"
+      | "ERROR";
+    isPrimary: boolean;
+    externalAccountLabel: string;
+    externalAccountId: string;
+  }>;
   createdAt: string;
   members: Array<{
     id: string;
@@ -85,11 +100,21 @@ export default function AdminBrandsPage() {
                     <span className="rounded-full border border-edge/10 px-3 py-1 text-xs text-copy-65">
                       {brand.isActive ? "Active" : "Inactive"}
                     </span>
-                    {brand.shopifyShopDomain && (
-                      <span className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-200">
-                        Shopify connected
+                    {(brand.connections ?? []).map((connection) => (
+                      <span
+                        key={connection.id}
+                        className={
+                          connection.status === "CONNECTED"
+                            ? "rounded-full border border-emerald-400/20 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-700 dark:text-emerald-200"
+                            : "rounded-full border border-edge/10 px-3 py-1 text-xs text-copy-65"
+                        }
+                      >
+                        {connection.provider === "COMMERCE7"
+                          ? "Commerce7"
+                          : "Shopify"}{" "}
+                        {connection.status.toLowerCase().replace(/_/g, " ")}
                       </span>
-                    )}
+                    ))}
                   </div>
                   <p className="text-sm text-copy-55">/{brand.slug}</p>
                   {brand.bio && (
@@ -99,8 +124,18 @@ export default function AdminBrandsPage() {
                   )}
                   <div className="space-y-1 text-sm text-copy-55">
                     {brand.websiteUrl && <p>Website: {brand.websiteUrl}</p>}
-                    {brand.shopifyShopDomain && (
-                      <p>Shop: {brand.shopifyShopDomain}</p>
+                    {(brand.connections ?? []).map((connection) => (
+                      <p key={connection.id}>
+                        {connection.provider === "COMMERCE7"
+                          ? "Commerce7"
+                          : "Shopify"}
+                        : {connection.externalAccountLabel}
+                      </p>
+                    ))}
+                    {brand.connectionsComplete === false && (
+                      <p className="text-amber-700 dark:text-amber-200">
+                        Connection status could not be loaded.
+                      </p>
                     )}
                     <p>
                       Created {new Date(brand.createdAt).toLocaleDateString()}

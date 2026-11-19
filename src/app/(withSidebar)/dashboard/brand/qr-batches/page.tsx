@@ -7,9 +7,11 @@ import { BrandPageShell } from "@/components/brand/page-shell";
 import { fetchJson, getErrorMessage } from "@/components/experience/client-utils";
 import { PageCard } from "@/components/experience/experience-shell";
 import { Button } from "@/components/ui/button";
+import { ConfirmDestructive } from "@/components/confirm-destructive";
 import { Input } from "@/components/ui/input";
 import { SearchableOptionSelect, type PickedOption } from "@/components/brand/searchable-option-select";
 import { useLatestRequest } from "@/hooks/use-latest-request";
+import { useUrlFilters } from "@/hooks/use-url-filters";
 import {
   Dialog,
   DialogContent,
@@ -26,6 +28,7 @@ type Batch = {
   quantity: number;
   canDelete: boolean;
   archivedAt?: string | null;
+  redemptionStoppedAt?: string | null;
   campaign: {
     id: string;
     name: string;
@@ -36,9 +39,10 @@ type Batch = {
 type QRCodeRow = {
   id: string;
   code: string;
-  status: "NEW" | "REDEEMED";
+  status: "NEW" | "REDEEMED" | "INVALID";
   imageUrl: string | null;
   usedAt: string | null;
+  redemptionStoppedAt?: string | null;
   createdAt: string;
   usedBy: string | null;
   usedByEmail: string | null;
@@ -75,7 +79,7 @@ const ARCHIVED_VIEW_LABELS: Record<ArchivedView, string> = {
 type EditQRForm = {
   id: string;
   code: string;
-  status: "NEW" | "REDEEMED";
+  status: "NEW" | "REDEEMED" | "INVALID";
   imageUrl: string | null;
   usedAt: string | null;
   usedBy: string | null;
@@ -137,20 +141,32 @@ export default function BrandQRBatchesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [campaignFilter, setCampaignFilter] = useState<PickedOption | null>(null);
-  const [batchFilter, setBatchFilter] = useState<PickedOption | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  // Filters live in the URL so they survive refresh and navigation. The pasted
+  // code search is deliberately NOT here: an unused QR code is a redemption secret.
+  const [urlFilters, setUrlFilters] = useUrlFilters({
+    campaignId: "", campaignName: "", batchId: "", batchName: "",
+    status: "all", archived: "exclude", batchQ: "", page: "1", batchPage: "1",
+  });
+  const campaignFilter: PickedOption | null = urlFilters.campaignId ? { id: urlFilters.campaignId, name: urlFilters.campaignName || "Campaign" } : null;
+  const batchFilter: PickedOption | null = urlFilters.batchId ? { id: urlFilters.batchId, name: urlFilters.batchName || "Batch" } : null;
+  const statusFilter: StatusFilter = urlFilters.status === "NEW" || urlFilters.status === "REDEEMED" ? urlFilters.status : "all";
+  const archivedView: ArchivedView = urlFilters.archived === "only" || urlFilters.archived === "include" ? urlFilters.archived : "exclude";
+  const page = Math.max(1, Math.floor(Number(urlFilters.page)) || 1);
+  const batchPage = Math.max(1, Math.floor(Number(urlFilters.batchPage)) || 1);
   const [codeSearch, setCodeSearch] = useState("");
-  const [batchSearch, setBatchSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [batchPage, setBatchPage] = useState(1);
+  const [batchSearch, setBatchSearch] = useState(urlFilters.batchQ);
   const [editForm, setEditForm] = useState<EditQRForm | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingBatchId, setDeletingBatchId] = useState<string | null>(null);
+  const [stoppingId, setStoppingId] = useState<string | null>(null);
   const [archivingBatchId, setArchivingBatchId] = useState<string | null>(null);
-  const [archivedView, setArchivedView] = useState<ArchivedView>("exclude");
   const debouncedCodeSearch = useDebounced(codeSearch.trim());
   const debouncedBatchSearch = useDebounced(batchSearch.trim());
+  useEffect(() => {
+    if (debouncedBatchSearch !== urlFilters.batchQ) setUrlFilters({ batchQ: debouncedBatchSearch, batchPage: "1" });
+    // Only the debounced text drives this write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedBatchSearch]);
 
   // Every filter is applied by the server; the page only holds the current
   // result. Changing any filter returns to page 1 of that result.
@@ -196,11 +212,6 @@ export default function BrandQRBatchesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listUrl, load]);
 
-  function resetPages() {
-    setPage(1);
-    setBatchPage(1);
-  }
-
   async function reloadData() {
     await load(listUrl, "refresh");
   }
@@ -234,14 +245,6 @@ export default function BrandQRBatchesPage() {
   }
 
   async function handleDeleteQrCode(qrCodeId: string) {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this QR code?",
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
     setSavingId(qrCodeId);
     setActionError(null);
 
@@ -270,7 +273,7 @@ export default function BrandQRBatchesPage() {
         method: "POST",
       });
       if (batchFilter?.id === batchId && archivedView !== "include") {
-        setBatchFilter(null);
+        setUrlFilters({ batchId: "", batchName: "" });
       }
       await reloadData();
     } catch (archiveError) {
@@ -283,15 +286,21 @@ export default function BrandQRBatchesPage() {
     }
   }
 
-  async function handleDeleteBatch(batchId: string) {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this batch and all QR codes in it?",
-    );
-
-    if (!confirmed) {
-      return;
+  async function handleSetRedemptionStopped(url: string, stop: boolean, id: string) {
+    setStoppingId(id);
+    setActionError(null);
+    try {
+      await brandFetch(url, { method: "POST" });
+      await reloadData();
+    } catch (stopError) {
+      await reloadData();
+      setActionError(getErrorMessage(stopError, stop ? "Failed to stop redemptions." : "Failed to resume redemptions."));
+    } finally {
+      setStoppingId(null);
     }
+  }
 
+  async function handleDeleteBatch(batchId: string) {
     setDeletingBatchId(batchId);
     setActionError(null);
 
@@ -301,7 +310,7 @@ export default function BrandQRBatchesPage() {
       });
 
       if (batchFilter?.id === batchId) {
-        setBatchFilter(null);
+        setUrlFilters({ batchId: "", batchName: "" });
       }
       await reloadData();
     } catch (deleteError) {
@@ -350,9 +359,7 @@ export default function BrandQRBatchesPage() {
                 <select
                   value={archivedView}
                   onChange={(event) => {
-                    setArchivedView(event.target.value as ArchivedView);
-                    setBatchFilter(null);
-                    resetPages();
+                    setUrlFilters({ archived: event.target.value, batchId: "", batchName: "", page: "1", batchPage: "1" });
                   }}
                   className="h-10 min-w-[180px] rounded-xl border border-edge/10 bg-inset/20 px-3 text-sm text-ink"
                 >
@@ -372,7 +379,7 @@ export default function BrandQRBatchesPage() {
                   value={batchSearch}
                   onChange={(event) => {
                     setBatchSearch(event.target.value);
-                    setBatchPage(1);
+                    setUrlFilters({ batchPage: "1" });
                   }}
                   placeholder="Batch name"
                   className="h-10 w-[240px] rounded-xl border-edge/10 bg-inset/20 text-ink"
@@ -396,8 +403,7 @@ export default function BrandQRBatchesPage() {
                       key={batch.id}
                       className="cursor-pointer transition hover:bg-white/[0.03]"
                       onClick={() => {
-                        setBatchFilter({ id: batch.id, name: batch.name });
-                        setPage(1);
+                        setUrlFilters({ batchId: batch.id, batchName: batch.name, page: "1" });
                       }}
                     >
                       <td className="py-3">
@@ -405,6 +411,11 @@ export default function BrandQRBatchesPage() {
                         {batch.archivedAt ? (
                           <span className="ml-2 rounded-full border border-edge/20 px-2 py-0.5 text-xs text-copy-65">
                             Archived
+                          </span>
+                        ) : null}
+                        {batch.redemptionStoppedAt ? (
+                          <span className="ml-2 rounded-full border border-amber-500/40 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+                            Redemptions stopped
                           </span>
                         ) : null}
                       </td>
@@ -424,6 +435,38 @@ export default function BrandQRBatchesPage() {
                           >
                             Export CSV
                           </Button>
+                          {batch.redemptionStoppedAt ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={stoppingId === batch.id}
+                              className="h-8 rounded-xl border-edge/20 bg-glass-10 px-4 text-ink hover:bg-glass-20"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void handleSetRedemptionStopped(`/api/brand/qr-batches/${batch.id}/resume-redemptions`, false, batch.id);
+                              }}
+                            >
+                              {stoppingId === batch.id ? "Saving..." : "Resume redemptions"}
+                            </Button>
+                          ) : (
+                            <ConfirmDestructive
+                              title={`Stop new redemptions for “${batch.name}”?`}
+                              description="Unused codes in this batch will stop unlocking campaigns and awarding points. People who already unlocked keep their access and points, and printed links keep working. You can resume at any time."
+                              confirmLabel="Stop redemptions"
+                              onConfirm={() => handleSetRedemptionStopped(`/api/brand/qr-batches/${batch.id}/stop-redemptions`, true, batch.id)}
+                              trigger={
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  disabled={stoppingId === batch.id}
+                                  className="h-8 rounded-xl border-edge/20 bg-glass-10 px-4 text-ink hover:bg-glass-20"
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  {stoppingId === batch.id ? "Saving..." : "Stop redemptions"}
+                                </Button>
+                              }
+                            />
+                          )}
                           <Button
                             type="button"
                             variant="outline"
@@ -440,21 +483,24 @@ export default function BrandQRBatchesPage() {
                                 ? "Unarchive"
                                 : "Archive"}
                           </Button>
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            disabled={!batch.canDelete || deletingBatchId === batch.id}
-                            aria-describedby={!batch.canDelete ? `batch-delete-reason-${batch.id}` : undefined}
-                            className="h-8 rounded-xl bg-[#C85A63] px-5 text-white hover:bg-[#b94b54]"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void handleDeleteBatch(batch.id);
-                            }}
-                          >
-                            {deletingBatchId === batch.id
-                              ? "Deleting..."
-                              : "Delete Batch"}
-                          </Button>
+                          <ConfirmDestructive
+                            title={`Delete batch “${batch.name}”?`}
+                            description="This permanently deletes the batch and every QR code in it. It is only possible because none of the codes were used or distributed; this cannot be undone."
+                            confirmLabel="Delete batch"
+                            onConfirm={() => handleDeleteBatch(batch.id)}
+                            trigger={
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                disabled={!batch.canDelete || deletingBatchId === batch.id}
+                                aria-describedby={!batch.canDelete ? `batch-delete-reason-${batch.id}` : undefined}
+                                className="h-8 rounded-xl bg-[#C85A63] px-5 text-white hover:bg-[#b94b54]"
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                {deletingBatchId === batch.id ? "Deleting..." : "Delete Batch"}
+                              </Button>
+                            }
+                          />
                         </div>
                         {!batch.canDelete && <p id={`batch-delete-reason-${batch.id}`} className="mt-1 text-xs text-copy-65">Cannot delete — QR codes have already been used or distributed. Archive this batch to hide it from the list; its printed links keep working.</p>}
                       </td>
@@ -470,7 +516,7 @@ export default function BrandQRBatchesPage() {
                     : "No batches match the selected filters."}
                 </p>
               )}
-              <Pager label="Batches" pagination={data.batchPagination} onPage={setBatchPage} disabled={refreshing} />
+              <Pager label="Batches" pagination={data.batchPagination} onPage={(next) => setUrlFilters({ batchPage: String(next) })} disabled={refreshing} />
             </div>
           </PageCard>
 
@@ -492,7 +538,7 @@ export default function BrandQRBatchesPage() {
                     value={codeSearch}
                     onChange={(event) => {
                       setCodeSearch(event.target.value);
-                      setPage(1);
+                      setUrlFilters({ page: "1" });
                     }}
                     placeholder="Code or scan link"
                     className="h-10 w-[220px] rounded-xl border-edge/10 bg-inset/20 text-ink"
@@ -505,9 +551,7 @@ export default function BrandQRBatchesPage() {
                   value={campaignFilter}
                   allLabel="All campaigns"
                   onChange={(option) => {
-                    setCampaignFilter(option);
-                    setBatchFilter(null);
-                    resetPages();
+                    setUrlFilters({ campaignId: option?.id ?? "", campaignName: option?.name ?? "", batchId: "", batchName: "", page: "1", batchPage: "1" });
                   }}
                 />
 
@@ -518,8 +562,7 @@ export default function BrandQRBatchesPage() {
                   allLabel="All batches"
                   params={{ archived: archivedView, campaignId: campaignFilter?.id }}
                   onChange={(option) => {
-                    setBatchFilter(option);
-                    setPage(1);
+                    setUrlFilters({ batchId: option?.id ?? "", batchName: option?.name ?? "", page: "1" });
                   }}
                 />
 
@@ -528,8 +571,7 @@ export default function BrandQRBatchesPage() {
                   <select
                     value={statusFilter}
                     onChange={(event) => {
-                      setStatusFilter(event.target.value as StatusFilter);
-                      setPage(1);
+                      setUrlFilters({ status: event.target.value, page: "1" });
                     }}
                     className="h-10 min-w-[140px] rounded-xl border border-edge/10 bg-inset/20 px-3 text-sm text-ink"
                   >
@@ -562,7 +604,14 @@ export default function BrandQRBatchesPage() {
                       </td>
                       <td className="py-3">{qrCode.batch?.name || "—"}</td>
                       <td className="py-3">{qrCode.campaign.name}</td>
-                      <td className="py-3">{qrCode.status}</td>
+                      <td className="py-3">
+                        {qrCode.status}
+                        {qrCode.redemptionStoppedAt && qrCode.status === "NEW" ? (
+                          <span className="ml-2 rounded-full border border-amber-500/40 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+                            Stopped
+                          </span>
+                        ) : null}
+                      </td>
                       <td className="py-3">{qrCode.usedBy || "—"}</td>
                       <td className="py-3">{formatDateTime(qrCode.usedAt)}</td>
                       <td className="py-3">
@@ -587,15 +636,39 @@ export default function BrandQRBatchesPage() {
                           >
                             Edit
                           </Button>
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            disabled={savingId === qrCode.id}
-                            className="h-8 rounded-xl bg-[#C85A63] px-5 text-white hover:bg-[#b94b54]"
-                            onClick={() => void handleDeleteQrCode(qrCode.id)}
-                          >
-                            {savingId === qrCode.id ? "Deleting..." : "Delete"}
-                          </Button>
+                          {qrCode.status === "NEW" ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={stoppingId === qrCode.id}
+                              className="h-8 rounded-xl border-edge/20 bg-transparent px-4 text-ink hover:bg-white/[0.06] hover:text-ink"
+                              onClick={() =>
+                                void handleSetRedemptionStopped(
+                                  `/api/brand/qr-codes/${qrCode.id}/${qrCode.redemptionStoppedAt ? "resume" : "stop"}-redemption`,
+                                  !qrCode.redemptionStoppedAt,
+                                  qrCode.id,
+                                )
+                              }
+                            >
+                              {stoppingId === qrCode.id ? "Saving..." : qrCode.redemptionStoppedAt ? "Resume" : "Stop"}
+                            </Button>
+                          ) : null}
+                          <ConfirmDestructive
+                            title={`Delete code ${qrCode.code}?`}
+                            description="This permanently deletes this QR code. It is only possible when the code has no history (never scanned, redeemed or distributed); this cannot be undone."
+                            confirmLabel="Delete code"
+                            onConfirm={() => handleDeleteQrCode(qrCode.id)}
+                            trigger={
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                disabled={savingId === qrCode.id}
+                                className="h-8 rounded-xl bg-[#C85A63] px-5 text-white hover:bg-[#b94b54]"
+                              >
+                                {savingId === qrCode.id ? "Deleting..." : "Delete"}
+                              </Button>
+                            }
+                          />
                         </div>
                       </td>
                     </tr>
@@ -608,7 +681,7 @@ export default function BrandQRBatchesPage() {
                   No QR codes match the selected filters.
                 </p>
               )}
-              <Pager label="QR codes" pagination={data.pagination} onPage={setPage} disabled={refreshing} />
+              <Pager label="QR codes" pagination={data.pagination} onPage={(next) => setUrlFilters({ page: String(next) })} disabled={refreshing} />
             </div>
           </PageCard>
         </div>

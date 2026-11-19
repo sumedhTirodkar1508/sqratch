@@ -25,6 +25,14 @@ export type CredentialLoginDeps = {
   findUserByEmail: (email: string) => Promise<CredentialLoginUser | null>;
   hasPendingApproval: (userId: string) => Promise<boolean>;
   comparePassword: (password: string, hash: string) => Promise<boolean>;
+  /**
+   * Optional throttle. `beginAttempt` counts this attempt before the password is
+   * checked and reports whether it is over a limit; `recordSuccess` runs after a
+   * fully successful sign-in. A throttled attempt gets exactly the wrong-password
+   * answer and the same bcrypt work, so it reveals nothing about the account.
+   */
+  beginAttempt?: (email: string) => Promise<boolean>;
+  recordSuccess?: (email: string) => Promise<void>;
 };
 
 export type CredentialLoginSuccess = {
@@ -64,7 +72,8 @@ export async function evaluateCredentialLogin(
   deps: CredentialLoginDeps,
 ): Promise<CredentialLoginResult> {
   const email = input.email.trim().toLowerCase();
-  const user = await deps.findUserByEmail(email);
+  const throttled = (await deps.beginAttempt?.(email)) ?? false;
+  const user = throttled ? null : await deps.findUserByEmail(email);
 
   // Always perform the bcrypt comparison — against the real hash for a
   // password-backed user, or the fixed dummy hash otherwise — before any
@@ -100,6 +109,7 @@ export async function evaluateCredentialLogin(
     };
   }
 
+  await deps.recordSuccess?.(email);
   return {
     ok: true,
     outcome: "success",

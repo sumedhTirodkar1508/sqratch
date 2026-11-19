@@ -78,7 +78,7 @@ export function inventoryCodeWhere(brandId: string, query: InventoryQuery): Pris
   if (query.batchId) and.push({ batchId: query.batchId });
   if (query.campaignId) and.push({ campaignId: query.campaignId });
   if (query.status === "REDEEMED") and.push({ status: "USED" });
-  if (query.status === "NEW") and.push({ status: { not: "USED" } });
+  if (query.status === "NEW") and.push({ status: "NEW" });
   if (query.codeSearch) and.push({ qrCodeData: { startsWith: query.codeSearch } });
   return { campaign: { brandId }, AND: and };
 }

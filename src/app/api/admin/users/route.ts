@@ -63,6 +63,7 @@ export async function GET(request: NextRequest) {
             createdAt: "asc",
           },
         },
+        _count: { select: { brandMembers: true } },
       },
     });
 
@@ -76,6 +77,7 @@ export async function GET(request: NextRequest) {
         createdAt: user.createdAt,
         isActive: user.isActive,
         hasCreatorProfile: Boolean(user.creatorProfile),
+        brandMembershipCount: user._count.brandMembers,
         brands: user.brandMembers.map((member) => ({
           id: member.brand.id,
           name: member.brand.name,

@@ -19,11 +19,11 @@ const mixed = [
   order(null, 80, 0, null), order("PAID", 9000, 0, "CAD"),
 ];
 
-test("the new order-value fields carry exactly the old figures and keep currencies apart", () => {
+test("the order-value fields keep currencies apart and the removed aliases are gone", () => {
   const result = buildConversionAnalytics(mixed);
-  assert.deepEqual(result.attributedOrderValueByCurrency, result.grossAttributedRevenueByCurrency);
-  assert.deepEqual(result.refundedAttributedValueByCurrency, result.refundedRevenueByCurrency);
-  assert.deepEqual(result.currentNetAttributedOrderValueByCurrency, result.netAttributedRevenueByCurrency);
+  for (const removed of ["grossAttributedRevenueByCurrency", "refundedRevenueByCurrency", "netAttributedRevenueByCurrency"]) {
+    assert.ok(!(removed in result), removed);
+  }
   // Every status contributes to order value, including pending, authorized and voided.
   assert.deepEqual(result.attributedOrderValueByCurrency, [
     { currencyCode: "CAD", minor: "9700" },
@@ -71,14 +71,15 @@ test("a partially paid order counts at its full order total, and the label says 
   assert.match(ORDER_VALUE_LABELS.attributedOrderValue.definition, /not money collected/);
 });
 
-test("daily trend points keep the old and new money fields identical and still sum to the headline", () => {
+test("daily trend points carry no removed alias and still sum to the headline", () => {
   const rows = mixed.map((row, index) => ({ ...row, orderDate: new Date(Date.UTC(2026, 9, 1 + (index % 3))) }));
   const range = { start: new Date(Date.UTC(2026, 9, 1)), end: new Date(Date.UTC(2026, 9, 3, 23, 59, 59)) };
   const trend = buildConversionDailyTrend(rows, range, 400);
   const headline = buildConversionAnalytics(rows);
   for (const point of trend) {
-    assert.deepEqual(point.grossRevenueByCurrency, point.attributedOrderValueByCurrency);
-    assert.deepEqual(point.netRevenueByCurrency, point.currentNetAttributedOrderValueByCurrency);
+    for (const removed of ["grossRevenueByCurrency", "refundedRevenueByCurrency", "netRevenueByCurrency"]) {
+      assert.ok(!(removed in point), removed);
+    }
   }
   const total = (currency: string) => trend.reduce((sum, point) => sum + BigInt(point.attributedOrderValueByCurrency.find((r) => r.currencyCode === currency)?.minor ?? "0"), BigInt(0));
   for (const row of headline.attributedOrderValueByCurrency) assert.equal(total(row.currencyCode).toString(), row.minor);
@@ -102,7 +103,9 @@ test("every conversion panel states its period, timezone and date basis, and the
     "src/app/(withSidebar)/dashboard/creator/analytics/page.tsx",
   ]) {
     const page = readFileSync(path, "utf8");
-    assert.match(page, /\(UTC\), counted only when SQRATCH has exact/);
+    // Period, timezone, basis and scope come from the server's `meta` (P39).
+    assert.match(page, /<ReportScopeCaption meta=\{data\.meta\}/);
+    assert.match(page, /<AttributionNote \/>/);
     assert.match(page, /<DateBasisNotes basis=\{data\.dateBasis\} fallbackOrderCount=\{data\.fallbackOrderCount\} \/>/);
     assert.match(page, /<DateBasisSelect/);
     assert.match(page, /<FinancialStatusBreakdown/);
@@ -122,6 +125,6 @@ test("the creator engagement route uses the strict UTC resolver and never falls 
   assert.doesNotMatch(route, /setHours|new Date\(dateFrom\)|new Date\(dateTo\)/);
   assert.doesNotMatch(route, /start \|\| end|start \? \{/);
   const page = readFileSync("src/app/(withSidebar)/dashboard/creator/analytics/page.tsx", "utf8");
-  assert.match(page, /Lessons marked complete, last updated in period/);
+  assert.match(page, /Lessons first completed in period/);
   assert.doesNotMatch(page, /label="Completed lessons"/);
 });

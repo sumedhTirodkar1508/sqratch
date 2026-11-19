@@ -1,8 +1,9 @@
 "use client";
 
 import { DateBasisNotes, DateBasisSelect } from "@/components/commerce/date-basis-select";
-import type { OrderDateBasis } from "@/lib/commerce/order-date-basis";
-import { useCallback, useEffect, useState } from "react";
+import { parseOrderDateBasis, type OrderDateBasis } from "@/lib/commerce/order-date-basis";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useUrlFilters } from "@/hooks/use-url-filters";
 import { CreatorPageShell } from "@/components/creator/page-shell";
 import { fetchJson, getErrorMessage } from "@/components/experience/client-utils";
 import { PageCard } from "@/components/experience/experience-shell";
@@ -25,8 +26,12 @@ import {
   TREND_COLUMN_LABELS,
 } from "@/lib/commerce/analytics-labels";
 import { FinancialStatusBreakdown } from "@/components/commerce/financial-status-breakdown";
+import { AttributionNote, ReportScopeCaption } from "@/components/commerce/report-scope-caption";
+import { describeReportScope, parseReportMeta } from "@/lib/report-meta";
 
 type AnalyticsResponse = {
+  /** Validated with `parseReportMeta` before use. */
+  meta?: unknown;
   filters: {
     experienceId: string | null;
     dateFrom: string | null;
@@ -48,7 +53,9 @@ type AnalyticsResponse = {
     lessonStarts: number;
     lessonCompletions: number;
     questions: number;
-    completedLessonsFromProgress: number;
+    lessonsCompletedInPeriod: number;
+    lessonsCurrentlyComplete: number;
+    completionDateNotRecorded: number;
   };
   byExperience: Array<{
     id: string;
@@ -74,6 +81,8 @@ type AnalyticsResponse = {
  * clicked product — those are two different questions about one click.
  */
 type CommerceAnalyticsResponse = {
+  /** Validated with `parseReportMeta` before use. */
+  meta?: unknown;
   range: { start: string; end: string };
   filters: { experienceId: string | null; limit: number };
   totals: {
@@ -104,11 +113,12 @@ const SURFACE_LABELS: Record<string, string> = {
 };
 
 export default function CreatorAnalyticsPage() {
-  const [filters, setFilters] = useState({
-    experienceId: "",
-    dateFrom: "",
-    dateTo: "",
-  });
+  // Dates, the chosen experience and the order-date basis live in the URL so a
+  // refresh or shared link keeps the same view.
+  const [urlFilters, setUrlFilters] = useUrlFilters({ experienceId: "", dateFrom: "", dateTo: "", dateBasis: "provider" });
+  const { experienceId, dateFrom, dateTo } = urlFilters;
+  const filters = useMemo(() => ({ experienceId, dateFrom, dateTo }), [experienceId, dateFrom, dateTo]);
+  const setFilters = (update: (current: typeof filters) => typeof filters) => setUrlFilters(update(filters));
   const [data, setData] = useState<AnalyticsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Selector options are kept apart from any one response: they list every
@@ -132,7 +142,8 @@ export default function CreatorAnalyticsPage() {
   // state: a failure here must never blank the experience or click panels
   // above, and vice versa.
   const [conversion, setConversion] = useState<CreatorConversionAnalytics | null>(null);
-  const [dateBasis, setDateBasis] = useState<OrderDateBasis>("provider");
+  const dateBasis: OrderDateBasis = parseOrderDateBasis(urlFilters.dateBasis) ?? "provider";
+  const setDateBasis = (basis: OrderDateBasis) => setUrlFilters({ dateBasis: basis });
   const [conversionError, setConversionError] = useState<string | null>(null);
   const [conversionLoading, setConversionLoading] = useState(true);
 
@@ -323,8 +334,8 @@ export default function CreatorAnalyticsPage() {
       </PageCard>
 
       <p className="text-xs text-copy-55">
-        {data?.range
-          ? `Experience metrics for ${data.range.start.slice(0, 10)} to ${data.range.end.slice(0, 10)} (UTC calendar days).`
+        {parseReportMeta(data?.meta)
+          ? describeReportScope(parseReportMeta(data?.meta)!)
           : "Experience metrics use UTC calendar days."}{" "}
         With no dates chosen, the last 30 days are shown.
       </p>
@@ -357,9 +368,21 @@ export default function CreatorAnalyticsPage() {
             />
             <MetricCard label="Questions" value={data.totals.questions} />
             <MetricCard
-              label="Lessons marked complete, last updated in period"
-              value={data.totals.completedLessonsFromProgress}
-              description="Lessons currently marked complete whose progress record changed in this period. SQRATCH does not record when a lesson was first completed, so this can include lessons completed earlier."
+              label="Lessons first completed in period"
+              value={data.totals.lessonsCompletedInPeriod}
+              description="Counted from the time a lesson was first completed, which later progress saves never change. Your own activity is excluded."
+            />
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <MetricCard
+              label="Lessons currently complete"
+              value={data.totals.lessonsCurrentlyComplete}
+              description="Complete right now, whenever they were completed. Not limited to the period."
+            />
+            <MetricCard
+              label="Completed, date not recorded"
+              value={data.totals.completionDateNotRecorded}
+              description="Completed before first-completion times were recorded. They count as currently complete but cannot be placed in a period."
             />
           </div>
 
@@ -507,10 +530,8 @@ function CommerceClickSection({
       <PageCard>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-xl font-semibold">Product clicks per day</h2>
-          <p className="text-xs text-copy-45">
-            {data.range.start.slice(0, 10)} to {data.range.end.slice(0, 10)} (UTC)
-          </p>
         </div>
+        <ReportScopeCaption meta={parseReportMeta(data.meta)} />
 
         {/* The timestamp sample is read OLDEST-FIRST, so truncation drops the
             LATEST days rather than thinning every day evenly. Saying only "at
@@ -735,13 +756,11 @@ function ConversionAnalyticsSection({
       <PageCard>
         <h2 className="text-xl font-semibold">{CONVERSION_SECTION_TITLE}</h2>
         <p className="mt-2 text-sm text-copy-65">
-          Orders and order value for {data.range.start.slice(0, 10)} to{" "}
-          {data.range.end.slice(0, 10)} (UTC), counted only when SQRATCH has exact
+          Orders and order value, counted as attributed only when SQRATCH has exact
           attribution evidence linking an order to your click.
-          {data.filters.experienceId
-            ? " Filtered to the selected experience."
-            : " Across all your experiences."}
         </p>
+        <ReportScopeCaption meta={data.meta} />
+        <AttributionNote />
         <DateBasisSelect value={dateBasis} onChange={onDateBasisChange} />
         <DateBasisNotes basis={data.dateBasis} fallbackOrderCount={data.fallbackOrderCount} />
       </PageCard>

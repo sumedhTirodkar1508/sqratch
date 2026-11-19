@@ -83,7 +83,7 @@ describe("enrichBrandConversionBreakdownNames", () => {
 
     // Untouched fields pass through byte-for-byte.
     assert.equal(enriched.attributedOrders, conversion.attributedOrders);
-    assert.deepEqual(enriched.grossAttributedRevenueByCurrency, conversion.grossAttributedRevenueByCurrency);
+    assert.deepEqual(enriched.attributedOrderValueByCurrency, conversion.attributedOrderValueByCurrency);
     assert.deepEqual(enriched.attributedOrdersByProvider, conversion.attributedOrdersByProvider);
 
     // Every breakdown row now carries its resolved name alongside the count.

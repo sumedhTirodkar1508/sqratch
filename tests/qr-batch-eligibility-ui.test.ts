@@ -8,7 +8,7 @@ type Node = { type: string; props: Record<string, unknown> };
 function nodes(value: unknown): Node[] {
   if (Array.isArray(value)) return value.flatMap(nodes);
   if (!value || typeof value !== "object" || !("props" in value)) return [];
-  const node = value as Node; return [node, ...nodes(node.props.children)];
+  const node = value as Node; return [node, ...nodes(node.props.children), ...nodes(node.props.trigger)];
 }
 function content(value: unknown): string {
   if (Array.isArray(value)) return value.map(content).join("");
@@ -26,6 +26,7 @@ test("batch eligibility disables deletion and a stale conflict keeps the list vi
     if (name === "react") return react;
     if (name === "react/jsx-runtime") return { jsx, jsxs: jsx };
     if (name === "next/link") return { __esModule: true, default: "Link" };
+    if (name === "@/hooks/use-url-filters") return { useUrlFilters: (defaults: object) => [defaults, () => {}] };
     if (name === "@/hooks/use-latest-request") return { useLatestRequest: () => () => ({ signal: undefined, isCurrent: () => true }) };
     if (name === "@/components/brand/brand-fetch") return { useBrandFetch: () => async () => { throw new Error("QR codes have history."); } };
     if (name === "@/components/experience/client-utils") return { fetchJson: async () => result(reads++ === 0), getErrorMessage: (error: Error) => error.message };
@@ -35,7 +36,9 @@ test("batch eligibility disables deletion and a stale conflict keeps the list vi
   render(); effects.forEach((run) => run()); await new Promise<void>((resolve) => setImmediate(resolve));
   let tree = render(); let buttons = nodes(tree).filter((n) => n.type === "Button" && content(n) === "Delete Batch");
   assert.equal(buttons.length, 2); assert.equal(buttons[0].props.disabled, false); assert.equal(buttons[1].props.disabled, true);
-  (buttons[0].props.onClick as (e: object) => void)({ stopPropagation() {} }); await new Promise<void>((resolve) => setImmediate(resolve));
+  // The destructive action now goes through the shared confirmation dialog: confirming runs onConfirm.
+  const confirms = nodes(tree).filter((n) => n.type === "ConfirmDestructive" && String(n.props.title).startsWith("Delete batch"));
+  assert.equal(confirms.length, 2); (confirms[0].props.onConfirm as () => void)(); await new Promise<void>((resolve) => setImmediate(resolve));
   tree = render(); assert.match(content(tree), /QR codes have history/); assert.match(content(tree), /Clean/); assert.match(content(tree), /Used/);
   buttons = nodes(tree).filter((n) => n.type === "Button" && content(n) === "Delete Batch"); assert.equal(buttons[0].props.disabled, true);
 });

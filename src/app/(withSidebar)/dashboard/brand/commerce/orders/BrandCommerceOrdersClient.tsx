@@ -1,5 +1,6 @@
 "use client";
 
+import { buildUrlFilterQuery } from "@/hooks/use-url-filters";
 import { useBrandFetch } from "@/components/brand/brand-fetch";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,6 +16,11 @@ import { describeOrderEventNote } from "@/lib/commerce/order-event-notes";
 // actually returns. `order-list.ts` is safe to pull into a client bundle: its
 // only import is `import type`, so it carries no Prisma/server runtime.
 import { MAX_ORDER_NUMBER_SEARCH_LENGTH } from "@/lib/commerce/order-list";
+import {
+  instantToDateTimeLocalValue,
+  orderExplorerDateBasisCaption,
+  parseOrderDrilldownPeriod,
+} from "@/lib/commerce/order-drilldown";
 import {
   parseCatchUpStepResult,
   parseCustomRangeStepResult,
@@ -834,6 +840,8 @@ type OrderExplorerFilters = {
   attributed: string;
   dateFrom: string;
   dateTo: string;
+  /** "" is the default (store order date); `ingested` compares on the date SQRATCH received the order. */
+  dateBasis: string;
 };
 
 const EMPTY_FILTERS: OrderExplorerFilters = {
@@ -845,6 +853,7 @@ const EMPTY_FILTERS: OrderExplorerFilters = {
   attributed: "",
   dateFrom: "",
   dateTo: "",
+  dateBasis: "",
 };
 
 const FINANCIAL_STATUS_OPTIONS: Array<{ value: CommerceOrderFinancialStatus; label: string }> = [
@@ -880,6 +889,7 @@ function buildOrderQuery(filters: OrderExplorerFilters, cursor: string | null, l
   // by their whole offset.
   if (filters.dateFrom) params.set("dateFrom", new Date(filters.dateFrom).toISOString());
   if (filters.dateTo) params.set("dateTo", new Date(filters.dateTo).toISOString());
+  if (filters.dateBasis) params.set("dateBasis", filters.dateBasis);
   if (cursor) params.set("cursor", cursor);
   return params.toString();
 }
@@ -931,6 +941,14 @@ function readFiltersFromUrl(search: string): Partial<OrderExplorerFilters> {
   ) {
     seeded.orderNumber = orderNumber.trim();
   }
+
+  // The period and date basis a report linked with. Dates become the local
+  // wall-clock value the inputs hold, to the millisecond, so the request sent
+  // back is the same instant the report counted.
+  const period = parseOrderDrilldownPeriod(params);
+  if (period.dateFrom) seeded.dateFrom = instantToDateTimeLocalValue(period.dateFrom);
+  if (period.dateTo) seeded.dateTo = instantToDateTimeLocalValue(period.dateTo);
+  if (period.dateBasis === "ingested") seeded.dateBasis = "ingested";
 
   return seeded;
 }
@@ -1044,6 +1062,35 @@ function OrderExplorer({
     setDraft((current) => ({ ...current, ...seeded }));
     setApplied((current) => ({ ...current, ...seeded }));
   }, []);
+
+  // Keeps the applied filters in the URL so a refresh or shared link shows the same
+  // orders. Only non-sensitive values: statuses, attribution, period and basis. The
+  // order-number search is deliberately not written to the URL. The first run is
+  // skipped so the seeding effect above can read the incoming URL untouched.
+  const urlWriteArmed = useRef(false);
+  useEffect(() => {
+    if (!urlWriteArmed.current) {
+      urlWriteArmed.current = true;
+      return;
+    }
+    const iso = (local: string) => {
+      const date = local ? new Date(local) : null;
+      return date && !Number.isNaN(date.getTime()) ? date.toISOString() : "";
+    };
+    const query = buildUrlFilterQuery(
+      { attributed: "", financialStatus: "", fulfillmentStatus: "", dateFrom: "", dateTo: "", dateBasis: "" },
+      new URLSearchParams(window.location.search),
+      {
+        attributed: applied.attributed,
+        financialStatus: applied.financialStatus,
+        fulfillmentStatus: applied.fulfillmentStatus,
+        dateFrom: iso(applied.dateFrom),
+        dateTo: iso(applied.dateTo),
+        dateBasis: applied.dateBasis,
+      },
+    );
+    window.history.replaceState(null, "", query ? `${window.location.pathname}?${query}` : window.location.pathname);
+  }, [applied]);
 
   // Page 1 for the currently-applied filters. Re-runs when filters are
   // applied/reset or an external refresh (e.g. a finished reconciliation)
@@ -1193,7 +1240,22 @@ function OrderExplorer({
             className="border-edge/10 bg-inset/20 text-ink"
           />
         </label>
+
+        <label className="space-y-1 text-xs text-copy-55">
+          <span>Order date basis</span>
+          <select
+            value={draft.dateBasis}
+            onChange={(e) => setDraft((d) => ({ ...d, dateBasis: e.target.value }))}
+            className="h-10 w-full rounded-md border border-edge/10 bg-inset/20 px-3 text-sm text-ink"
+          >
+            <option value="">Date the store recorded (recommended)</option>
+            <option value="ingested">Date SQRATCH received the order</option>
+          </select>
+        </label>
       </div>
+      <p className="mt-2 text-[11px] text-copy-40">
+        {orderExplorerDateBasisCaption(applied.dateBasis === "ingested" ? "ingested" : "provider")}
+      </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <Button

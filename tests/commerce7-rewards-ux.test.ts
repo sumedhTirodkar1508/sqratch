@@ -42,7 +42,10 @@ function harness(path: string, exportName: string, props = {}, env: { DateImpl?:
       if (name === "lucide-react") return new Proxy({}, { get: (_target, key) => `Icon:${String(key)}` });
       if (name === "@/components/brand/brand-fetch") return { useBrandFetch: () => mockedFetchJson };
       if (name === "@/components/experience/client-utils") return { fetchJson: mockedFetchJson, getErrorMessage: (error: Error) => error.message };
-      if (name.startsWith("@/components/ui/")) return new Proxy({}, { get: (_target, key) => String(key) });
+      if (name.startsWith("@/components/ui/") || name === "@/components/confirm-destructive") return new Proxy({}, { get: (_target, key) => String(key) });
+      if (name === "@/hooks/use-discard-guard") return { useDiscardGuard: () => ({ guard: (action: () => void) => action(), dialog: null }) };
+      if (name === "@/hooks/use-unsaved-changes") return { useUnsavedChanges() {}, snapshotOf: JSON.stringify };
+      if (name === "@/hooks/use-url-filters") return { useUrlFilters: (defaults: Record<string, string>) => { const [values, set] = react.useState(defaults) as [Record<string, string>, (next: Record<string, string>) => void]; return [values, (patch: Record<string, string>) => set({ ...values, ...patch })]; } };
       throw new Error(`Unexpected dependency ${name}`);
     },
   });
@@ -791,4 +794,61 @@ test("a failed retry keeps the error visible and a later retry can succeed", asy
   app.requests[1].reject(new Error("second failure")); await settle();
   const tree = app.render(); assert.match(text(tree), /second failure/); assert.equal(button(tree, "Retry").props.disabled, false);
   (button(tree, "Retry").props.onClick as () => void)(); assert.equal(app.requests.length, 3);
+});
+
+// ── P29: claims paging, catalog paging and search, read-only history ─────────────────────────────────────────────
+
+const claimRow = (id: string, status = "ISSUED", extra: object = {}) => ({ id, title: `Claim ${id}`, status, provisioningState: "READY", providerCustomerId: null, providerTagId: null, tagTitle: null, message: null, ownerActive: false, canRevoke: false, canonicalOrderId: null, ...extra });
+const claimTitles = (app: ReturnType<typeof harness>) => nodes(app.render()).filter((node) => node.type === "p" && /^Claim c\d/.test(text(node))).map((node) => text(node).split(" · ")[0].trim());
+const claimFilterSelect = (app: ReturnType<typeof harness>) => nodes(app.render()).find((node) => node.type === "select" && node.props["aria-label"] === "Claim filter")!;
+
+test("claims: the first page shows needs-action counts, Load more reaches older claims, and a status filter asks the server", async () => {
+  const app = await brandForm({ ...brandData, claims: [claimRow("c1", "POINTS_DEBITED"), claimRow("c2")], claimsPage: { filter: "ALL", nextCursor: "cursor-1", totalCount: 130, needsActionCount: 1 } });
+  assert.match(text(app.render()), /1\s+need action\s+·\s+130\s+total/); assert.deepEqual(claimTitles(app), ["Claim c1", "Claim c2"]);
+  (button(app.render(), "Load more claims").props.onClick as () => void)();
+  assert.equal(app.requests.at(-1)!.url, "/api/brand/rewards/commerce7/claims?status=ALL&cursor=cursor-1");
+  app.requests.at(-1)!.resolve({ claims: [claimRow("c101"), claimRow("c102")], claimsPage: { filter: "ALL", nextCursor: null, totalCount: 130, needsActionCount: 1 } }); await settle();
+  assert.deepEqual(claimTitles(app), ["Claim c1", "Claim c2", "Claim c101", "Claim c102"], "older claims append after the first page");
+  assert.ok(!nodes(app.render()).some((node) => node.type === "Button" && text(node).includes("Load more claims")), "no button on the last page");
+  change(claimFilterSelect(app), "USED");
+  assert.equal(app.requests.at(-1)!.url, "/api/brand/rewards/commerce7/claims?status=USED");
+  app.requests.at(-1)!.resolve({ claims: [claimRow("c7", "USED")], claimsPage: { filter: "USED", nextCursor: null, totalCount: 130, needsActionCount: 1 } }); await settle();
+  assert.deepEqual(claimTitles(app), ["Claim c7"]);
+  change(claimFilterSelect(app), "ALL"); assert.deepEqual(claimTitles(app), ["Claim c1", "Claim c2"], "back to All shows the workspace's first page again");
+});
+
+test("product picker: Load more and server search reach products outside the first page, and a chosen product keeps its title", async () => {
+  const app = await brandForm({ ...brandData, products: [{ externalId: "a", title: "Alpha" }], productsPage: { nextCursor: "page-2", exclusiveNextCursor: null } });
+  change(select(app.render(), "ALL_PRODUCTS"), "SPECIFIC_PRODUCTS");
+  (button(app.render(), "Load more products").props.onClick as () => void)();
+  assert.equal(app.requests.at(-1)!.url, "/api/brand/rewards/commerce7/products?mode=all&cursor=page-2");
+  app.requests.at(-1)!.resolve({ products: [{ externalId: "z600", title: "Wine 600" }], nextCursor: null }); await settle();
+  assert.deepEqual(pickerTitles(app), ["Alpha", "Wine 600"]); assert.ok(!nodes(app.render()).some((node) => node.type === "Button" && text(node).includes("Load more products")));
+  (product(app.render(), "Wine 600").props.onCheckedChange as (v: boolean) => void)(true);
+  assert.match(text(app.render()), /Wine 600/); assert.equal(submitted(app).productIds[0], "z600");
+  // Searching: the loaded list filters at once, and after the debounce the server is asked.
+  const search = nodes(app.render()).find((node) => node.type === "Input" && node.props["aria-label"] === "Search products")!;
+  const before = app.requests.length; change(search, "gamma"); app.render(); app.flush(); assert.equal(app.requests.length, before, "no request until typing pauses");
+  app.advance(300); await settle(); assert.equal(app.requests.at(-1)!.url, "/api/brand/rewards/commerce7/products?mode=all&q=gamma");
+  app.requests.at(-1)!.resolve({ products: [{ externalId: "g", title: "Gamma 550" }], nextCursor: null }); await settle();
+  assert.deepEqual(pickerTitles(app), ["Gamma 550"]);
+  change(search, "zzz"); app.render(); app.flush(); app.advance(300); await settle(); app.requests.at(-1)!.resolve({ products: [], nextCursor: null }); await settle();
+  assert.match(text(app.render()), /No products match this search\./);
+});
+
+test("an offer's product title resolves from referencedProducts, not the raw id; a missing product reads as unavailable", async () => {
+  const live = { id: "o1", title: "Far product", appliesTo: "SPECIFIC_PRODUCTS", currencyCode: "CAD", description: null, isActive: false, rewardMode: "DISCOUNT", pointsCost: 100, discountType: "FIXED_AMOUNT", discountAmountCents: 1000, discountPercentageBasisPoints: null, minimumSubtotalCents: null, maxTotalRedemptions: 25, maxRedemptionsPerUser: 1, codeValidDays: 30, claimStartsAt: null, claimEndsAt: null, commerce7Config: { eligibilityMode: "ANYONE_WITH_CODE", discountEnabled: true }, products: [{ externalProductId: "wine-599" }, { externalProductId: "gone-id" }], totalClaims: 0, issuedCount: 0, _count: { redemptions: 0 } };
+  const app = await brandForm({ ...brandData, offers: [live], referencedProducts: [{ externalId: "wine-599", title: "Wine 599" }] });
+  const copy = text(app.render()); assert.match(copy, /Products:\s+Wine 599, Unavailable product/); assert.ok(!copy.includes("wine-599") && !copy.includes("gone-id"));
+});
+
+test("a disconnected Commerce7 shows history read-only: no create form, no edit or enable, claims keep their data, disable stays available", async () => {
+  const live = (id: string, isActive: boolean) => ({ id, title: `Offer ${id}`, appliesTo: "ALL_PRODUCTS", currencyCode: "CAD", description: null, isActive, rewardMode: "DISCOUNT", pointsCost: 100, discountType: "FIXED_AMOUNT", discountAmountCents: 1000, discountPercentageBasisPoints: null, minimumSubtotalCents: null, maxTotalRedemptions: 25, maxRedemptionsPerUser: 1, codeValidDays: 30, claimStartsAt: null, claimEndsAt: null, commerce7Config: { eligibilityMode: "ANYONE_WITH_CODE", discountEnabled: true }, products: [], totalClaims: 0, issuedCount: 0, editable: true, _count: { redemptions: 0 } });
+  const app = await brandForm({ ...brandData, providers: { COMMERCE7: false, SHOPIFY: true }, offers: [live("on", true), live("off", false)], claims: [claimRow("c1", "POINTS_DEBITED")], claimsPage: { filter: "ALL", nextCursor: null, totalCount: 1, needsActionCount: 1 } });
+  const tree = app.render(); const copy = text(tree);
+  assert.match(copy, /Commerce7 is not connected/); assert.ok(!nodes(tree).some((node) => node.type === "form"), "no create/edit form"); assert.match(copy, /Offer on/); assert.match(copy, /Claim c1/);
+  const row = (title: string) => nodes(tree).find((node) => node.type === "div" && nodes(node).some((child) => child.type === "h3" && text(child) === title) && nodes(node).some((child) => child.type === "Button"))!;
+  const label = (offer: string, name: string) => nodes(row(offer)).find((node) => node.type === "Button" && text(node).trim() === name)!;
+  assert.equal(label("Offer on", "Edit").props.disabled, true); assert.equal(label("Offer off", "Enable").props.disabled, true); assert.equal(label("Offer on", "Disable").props.disabled, false, "an active offer can still be turned off");
+  assert.equal(button(tree, "Check provider result").props.disabled, true);
 });

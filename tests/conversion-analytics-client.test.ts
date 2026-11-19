@@ -9,6 +9,8 @@
  */
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   parseBrandConversionAnalytics,
@@ -176,8 +178,8 @@ describe("providerLabel", () => {
   });
 });
 
-describe("P36 — money field names (current names, and older names from a server not yet updated)", () => {
-  const older = () => {
+describe("P39 — money field names (removed aliases are no longer read)", () => {
+  const removedAliases = () => {
     const fixture = validBrandFixture() as unknown as Record<string, unknown>;
     fixture.grossAttributedRevenueByCurrency = fixture.attributedOrderValueByCurrency;
     fixture.refundedRevenueByCurrency = fixture.refundedAttributedValueByCurrency;
@@ -185,31 +187,33 @@ describe("P36 — money field names (current names, and older names from a serve
     delete fixture.attributedOrderValueByCurrency;
     delete fixture.refundedAttributedValueByCurrency;
     delete fixture.currentNetAttributedOrderValueByCurrency;
-    delete fixture.financialStatusBreakdown;
-    delete fixture.cancelledAttributedOrders;
     return fixture;
   };
 
-  test("older field names normalize to the current names with identical values", () => {
-    const parsed = parseBrandConversionAnalytics(older());
+  test("current names parse, and a server that predates the status breakdown simply has none", () => {
+    const fixture = validBrandFixture() as unknown as Record<string, unknown>;
+    delete fixture.financialStatusBreakdown;
+    delete fixture.cancelledAttributedOrders;
+    const parsed = parseBrandConversionAnalytics(fixture);
     assert.deepEqual(parsed?.attributedOrderValueByCurrency, [{ currencyCode: "USD", minor: "123456" }]);
     assert.deepEqual(parsed?.refundedAttributedValueByCurrency, []);
     assert.deepEqual(parsed?.currentNetAttributedOrderValueByCurrency, [{ currencyCode: "USD", minor: "123456" }]);
-    // A server that predates the breakdown simply has none; it is never invented.
     assert.deepEqual(parsed?.financialStatusBreakdown, []);
     assert.equal(parsed?.cancelledAttributedOrders, 0);
   });
 
-  test("a payload with neither the current nor the older money field is rejected", () => {
-    const fixture = older();
-    delete fixture.grossAttributedRevenueByCurrency;
-    assert.equal(parseBrandConversionAnalytics(fixture), null);
+  test("a payload carrying only the removed alias names is rejected, not silently accepted", () => {
+    assert.equal(parseBrandConversionAnalytics(removedAliases()), null);
   });
 
-  test("a malformed older-name field is still rejected, and a malformed status breakdown is rejected", () => {
-    const fixture = older();
-    fixture.netAttributedRevenueByCurrency = [{ currencyCode: "USD" }];
-    assert.equal(parseBrandConversionAnalytics(fixture), null);
+  test("the parser source no longer mentions any removed alias", () => {
+    const source = readFileSync(join(process.cwd(), "src/lib/commerce/conversion-analytics-client.ts"), "utf8");
+    for (const alias of ["grossAttributedRevenueByCurrency", "refundedRevenueByCurrency", "netAttributedRevenueByCurrency", "grossRevenueByCurrency", "netRevenueByCurrency"]) {
+      assert.doesNotMatch(source, new RegExp(alias), alias);
+    }
+  });
+
+  test("a malformed status breakdown is rejected", () => {
     const bad = validBrandFixture() as unknown as Record<string, unknown>;
     bad.financialStatusBreakdown = [{ status: "PAID" }];
     assert.equal(parseBrandConversionAnalytics(bad), null);

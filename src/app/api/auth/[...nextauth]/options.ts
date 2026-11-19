@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import { hasPendingApproval } from "@/lib/approval-gating";
 import { logCredentialLoginEvent } from "@/lib/auth/auth-security";
 import { evaluateCredentialLogin } from "@/lib/auth/credential-login";
+import { loginThrottle } from "@/lib/auth/login-throttle";
 
 class ExpectedCredentialLoginFailure extends Error {}
 
@@ -29,6 +30,7 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(
         credentials?: Record<"email" | "password", string> | undefined,
+        req?: { headers?: Record<string, unknown> },
       ) {
         const email = String(credentials?.email || "")
           .trim()
@@ -56,6 +58,7 @@ export const authOptions: NextAuthOptions = {
               hasPendingApproval,
               comparePassword: (candidate, hash) =>
                 bcrypt.compare(candidate, hash),
+              ...loginThrottle(req?.headers),
             },
           );
 

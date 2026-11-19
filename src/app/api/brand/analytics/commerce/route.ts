@@ -33,6 +33,7 @@ import {
   type CommerceClickAnalyticsRepository,
   type CommerceClickAnalyticsScope,
 } from "@/lib/commerce/commerce-click-analytics-repository";
+import { buildReportMeta, requestedFilterNames, type ReportMeta } from "@/lib/report-meta";
 
 /**
  * Phase 11: BRAND-side, CLICK-ONLY commerce analytics.
@@ -149,6 +150,8 @@ export type BrandCommerceProductCampaignRow =
     };
 
 export type BrandCommerceAnalyticsData = {
+  /** What this report covers. The campaign filter is not applied here. */
+  meta: ReportMeta;
   /** Inclusive UTC bounds actually applied, echoed so a client cannot guess. */
   range: { start: string; end: string };
   /** Top-N size actually applied after clamping. */
@@ -384,6 +387,13 @@ export async function brandCommerceAnalyticsGetImpl(
     ]);
 
     const data: BrandCommerceAnalyticsData = {
+      meta: buildReportMeta({
+        period: range,
+        dateBasis: "event",
+        scope: "whole brand",
+        unsupportedFilters: requestedFilterNames(params, ["campaignId"]),
+        now: deps.now(),
+      }),
       range: {
         start: range.start.toISOString(),
         end: range.end.toISOString(),

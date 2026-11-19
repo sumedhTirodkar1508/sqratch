@@ -66,6 +66,7 @@ export async function GET(request: Request) {
           createdAt: "asc",
         },
       },
+      _count: { select: { brandMembers: true } },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -80,6 +81,7 @@ export async function GET(request: Request) {
       isActive: user.isActive,
       isEmailVerified: user.isEmailVerified,
       hasCreatorProfile: Boolean(user.creatorProfile),
+      brandMembershipCount: user._count.brandMembers,
       brands: user.brandMembers.map((member) => ({
         id: member.brand.id,
         name: member.brand.name,

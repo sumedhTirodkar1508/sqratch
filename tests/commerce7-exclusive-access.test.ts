@@ -8,6 +8,7 @@ import ts from "typescript";
 import { NextResponse } from "next/server";
 import * as domain from "../src/lib/commerce7-reward-domain";
 import * as eligibility from "../src/lib/commerce7-reward-eligibility";
+import * as brandRewardsRead from "../src/lib/commerce7-brand-rewards-read";
 import { fetchCommerce7ProductPage, normalizeCommerce7Product, readCommerce7ProductSecurity } from "../src/lib/commerce/providers/commerce7-products";
 import { computeProductFields, decideProductWrite } from "../src/lib/commerce/product-sync";
 import { fakeTenant, harness, offerBody, type Row } from "./commerce7-reward-harness";
@@ -129,18 +130,46 @@ test("the discount product rule is unchanged: any available synchronized product
 
 // ── Brand API: picker contents and no leaks ───────────────────────────────────
 
+/** In-memory ConnectedCommerceProduct: the where operators, ordering and cursor paging the Brand routes use. */
+function fakeCatalog(products: Row[]) {
+  const jsonAt = (value: unknown, path: string[]) => path.reduce<unknown>((current, key) => current && typeof current === "object" ? (current as Row)[key] : undefined, value);
+  const matches = (row: Row, where: Row): boolean => Object.entries(where).every(([key, condition]) => {
+    if (key === "AND") return (condition as Row[]).every((part) => matches(row, part));
+    const operator = condition && typeof condition === "object" ? (condition as Row) : null;
+    if (operator && "path" in operator) { const value = jsonAt(row[key], operator.path as string[]); return "equals" in operator ? value === operator.equals : Array.isArray(value) && (operator.array_contains as unknown[]).every((item) => value.includes(item)); }
+    if (operator && "in" in operator) return (operator.in as unknown[]).includes(row[key]);
+    if (operator && "not" in operator) return row[key] !== operator.not;
+    if (operator && "contains" in operator) return String(row[key]).toLowerCase().includes(String(operator.contains).toLowerCase());
+    return row[key] === condition;
+  });
+  const pick = (row: Row, select?: Row) => select ? Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])) : row;
+  const rows: Row[] = products.map((row) => ({ id: row.externalId, ...row }));
+  return {
+    findMany: async ({ where, select, take, cursor, skip }: { where: Row; select?: Row; take?: number; cursor?: { id: string }; skip?: number }) => {
+      const sorted = rows.filter((row) => matches(row, where)).sort((a, b) => String(a.title).localeCompare(String(b.title)) || String(a.id).localeCompare(String(b.id)));
+      const start = cursor ? sorted.findIndex((row) => row.id === cursor.id) + (skip ?? 0) : 0;
+      return sorted.slice(start, take === undefined ? undefined : start + take).map((row) => pick(row, select));
+    },
+    findFirst: async ({ where, select }: { where: Row; select?: Row }) => { const row = rows.find((candidate) => matches(candidate, where)); return row ? pick(row, select) : null; },
+    // total available, or (with the providerMetadata path filter) those whose Product Security was read
+    count: async ({ where }: { where: Row }) => rows.filter((row) => row.brandId === where.brandId && row.connectionId === where.connectionId && row.provider === "COMMERCE7" && row.isAvailable
+      && (!where.providerMetadata || Boolean(row.providerMetadata && typeof row.providerMetadata === "object" && !Array.isArray(row.providerMetadata) && "security" in (row.providerMetadata as object)))).length,
+    unknownCount: (brandId: string, connectionId: string) => rows.filter((row) => row.brandId === brandId && row.connectionId === connectionId && row.provider === "COMMERCE7" && row.isAvailable && !(row.providerMetadata && typeof row.providerMetadata === "object" && !Array.isArray(row.providerMetadata) && "security" in row.providerMetadata)).length,
+  };
+}
+
 function brandRoute(products: Row[], offers: Row[] = []) {
   const exports: Record<string, () => Promise<Response>> = {};
-  const pick = (row: Row, select?: Record<string, boolean>) => select ? Object.fromEntries(Object.keys(select).map((key) => [key, row[key]])) : row;
+  const catalogDb = fakeCatalog(products);
   const db = {
-    brandRewardOffer: { findMany: async () => offers },
-    commerceRewardRedemption: { findMany: async () => [], groupBy: async () => [] },
-    connectedCommerceProduct: { findMany: async ({ where, select }: { where: Row; select?: Record<string, boolean> }) => products.filter((row) => Object.entries(where).every(([key, value]) => row[key] === value)).map((row) => pick(row, select)) },
+    brandRewardOffer: { findMany: async () => offers, count: async () => offers.length, findFirst: async () => ({ id: "x" }) },
+    commerceRewardRedemption: { findMany: async () => [], groupBy: async () => [], count: async () => 0 },
+    connectedCommerceProduct: catalogDb,
   };
   runInNewContext(ts.transpileModule(readFileSync("src/app/api/brand/rewards/commerce7/route.ts", "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText, {
     exports, require(name: string) {
       const dependencies: Record<string, unknown> = {
-        "next/server": { NextResponse }, "@/lib/prisma": { __esModule: true, default: db }, "@/lib/commerce7-reward-eligibility": eligibility, "@/lib/commerce7-reward-domain": domain,
+        "next/server": { NextResponse }, "@/lib/prisma": { __esModule: true, default: db }, "@/lib/commerce7-reward-eligibility": eligibility, "@/lib/commerce7-reward-domain": domain, "@/lib/commerce7-brand-rewards-read": brandRewardsRead,
         "@/lib/brand-auth": { assertExpectedBrand, getBrandManagementContext: async () => ({ membership: { brand: { id: "brand" } } }), getBrandContextFailure: () => ({ error: "no", status: 403 }) },
         "@/lib/commerce/connection-service": { getActiveCommerceConnection: async (_brand: string, provider: string) => provider === "COMMERCE7" ? { id: "connection", displayName: "Winery", currencyCode: "CAD", status: "CONNECTED" } : null, isConnectionUsable: () => true },
         "@/lib/commerce/providers/commerce7": { getCommerce7AppConfig: () => ({}) }, "@/lib/commerce/providers/commerce7-rewards-client": { claimTagTitle: () => "SQRATCH-x" },
@@ -192,12 +221,12 @@ function tagOptionsRoute(options: { products?: Row[]; tags?: Record<string, Row 
   const products = options.products ?? [row("rare", "Rare - 2015 Chardonnay", secured("Tag", [TAG, SECOND, AUTO])), row("library", "Library Cabernet", secured("Tag", [TAG])), row("sample", "Sample Public Wine", secured("Public", []))];
   class FakeClient { constructor(readonly tenant: string) { reads.push(`tenant:${tenant}`); } async customerTag(id: string) { reads.push(`GET tag ${id}`); if (options.tags && id in options.tags) return options.tags[id]; return ({ [TAG]: { id: TAG, title: "SQRATCH Rare Wine Test", type: "Manual", objectType: "Customer" }, [SECOND]: { id: SECOND, title: "Library Members", type: "Manual", objectType: "Customer" }, [AUTO]: { id: AUTO, title: "Big Spenders", type: "Dynamic", objectType: "Customer" } } as Record<string, Row>)[id] ?? null; } }
   const handler = loadRoute("src/app/api/brand/rewards/commerce7/exclusive-tags/route.ts", {
-    "@/lib/prisma": { __esModule: true, default: { connectedCommerceProduct: { findMany: async ({ where }: { where: Row }) => products.filter((p) => p.brandId === where.brandId && p.connectionId === where.connectionId && p.isAvailable) }, brandRewardOffer: { findFirst: async ({ where }: { where: Row }) => (options.offers ?? []).find((o) => o.id === where.id && o.brandId === where.brandId) ?? null } } },
+    "@/lib/prisma": { __esModule: true, default: { connectedCommerceProduct: fakeCatalog(products), brandRewardOffer: { findFirst: async ({ where }: { where: Row }) => (options.offers ?? []).find((o) => o.id === where.id && o.brandId === where.brandId) ?? null } } },
     "@/lib/brand-auth": { assertExpectedBrand, getBrandManagementContext: async () => options.brand === false ? null : { membership: { brand: { id: "brand" } } }, getBrandContextFailure: () => ({ error: "Brand admin access required.", status: 403 }) },
     "@/lib/commerce/connection-service": { getActiveCommerceConnection: async () => ({ id: "connection", externalAccountId: "synthetic-tenant" }), isConnectionUsable: () => true },
     "@/lib/commerce/providers/commerce7": { getCommerce7AppConfig: () => options.backend === false ? null : {} },
     "@/lib/commerce/providers/commerce7-rewards-client": { Commerce7RewardsClient: FakeClient },
-    "@/lib/commerce7-reward-domain": domain,
+    "@/lib/commerce7-reward-domain": domain, "@/lib/commerce7-brand-rewards-read": brandRewardsRead,
     "@/lib/commerce7-reward-http": { rewardErrorResponse: (error: { message: string; status?: number }) => NextResponse.json({ error: error.message }, { status: error.status ?? 409 }) },
   });
   return { reads, get: async (query: string) => { const response = await handler.GET({ nextUrl: new URL(`https://sqratch.example/api/brand/rewards/commerce7/exclusive-tags?${query}`) }); return { status: response.status, body: await response.json() }; } };
@@ -235,6 +264,14 @@ test("Brand tag options refuse unauthenticated, ineligible, foreign or over-tagg
   }
 });
 
+test("Brand tag options resolve a product beyond position 500 by direct lookup and count shared products over the whole catalog", async () => {
+  const filler = Array.from({ length: 599 }, (_, i) => row(`wine-${String(i).padStart(3, "0")}`, `Wine ${String(i).padStart(3, "0")}`, secured("Public", [])));
+  const products = [...filler, row("far", "Wine 900", secured("Tag", [TAG])), row("far-shared", "Wine 901", secured("Tag", [TAG, SECOND]))];
+  const app = tagOptionsRoute({ products }); const { status, body } = await app.get("productId=far");
+  assert.equal(status, 200); assert.equal(body.productTitle, "Wine 900"); assert.equal(body.tags[0].sharedProductCount, 1); assert.deepEqual(body.tags[0].sharedProductTitles, ["Wine 901"]);
+  assert.equal((await app.get("productId=wine-005")).status, 400, "a public product is still refused");
+});
+
 test("the Brand claim route refuses to revoke exclusive access: SQRATCH never deletes a Customer Tag membership", async () => {
   const calls: string[] = [];
   const handler = loadRoute("src/app/api/brand/rewards/commerce7/claims/[claimId]/route.ts", {
@@ -252,9 +289,9 @@ test("the Brand claim route refuses to revoke exclusive access: SQRATCH never de
 test("Brand claims hide the merchant's tag UUID for exclusive claims and report access state and ownership guidance", async () => {
   const claim = { id: "c1", brandId: "brand", provider: "COMMERCE7", rewardMode: "EXCLUSIVE_PRODUCT_ACCESS", status: "ISSUED", provisioningState: "READY", providerCustomerId: "customer-1", providerTagId: TAG, connectionId: "connection", membershipOwnership: "SQRATCH_GRANTED", membershipWriteAttempted: true, providerMembershipId: "membership-1", membershipVerifiedAt: new Date(), needsManualReview: false, provisioningOwner: null, externalDiscountId: "coupon-1", lastReconcileReason: null, errorMessage: null, canonicalOrderId: null, createdAt: new Date(), rewardConfigSnapshot: { eligibilityMode: "CLAIMANT_ONLY" }, offer: { title: "Rare access" } };
   const exports: Record<string, () => Promise<Response>> = {};
-  const db = { brandRewardOffer: { findMany: async () => [] }, connectedCommerceProduct: { findMany: async () => [] }, commerceRewardRedemption: { findMany: async () => [claim], groupBy: async ({ by }: { by: string[] }) => by.includes("providerTagId") ? [{ connectionId: "connection", providerCustomerId: "customer-1", providerTagId: TAG, _count: { _all: 2 } }] : [] } };
+  const db = { brandRewardOffer: { findMany: async () => [], count: async () => 0, findFirst: async () => null }, connectedCommerceProduct: { findMany: async () => [], count: async () => 0 }, commerceRewardRedemption: { count: async () => 1, findMany: async ({ where }: { where: { AND: Row[] } }) => where.AND[0].needsManualReview === false ? [claim] : [], groupBy: async ({ by }: { by: string[] }) => by.includes("providerTagId") ? [{ connectionId: "connection", providerCustomerId: "customer-1", providerTagId: TAG, _count: { _all: 2 } }] : [] } };
   runInNewContext(ts.transpileModule(readFileSync("src/app/api/brand/rewards/commerce7/route.ts", "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText, { exports, require(name: string) {
-    const dependencies: Record<string, unknown> = { "next/server": { NextResponse }, "@/lib/prisma": { __esModule: true, default: db }, "@/lib/commerce7-reward-eligibility": eligibility, "@/lib/commerce7-reward-domain": domain,
+    const dependencies: Record<string, unknown> = { "next/server": { NextResponse }, "@/lib/prisma": { __esModule: true, default: db }, "@/lib/commerce7-reward-eligibility": eligibility, "@/lib/commerce7-reward-domain": domain, "@/lib/commerce7-brand-rewards-read": brandRewardsRead,
       "@/lib/brand-auth": { assertExpectedBrand, getBrandManagementContext: async () => ({ membership: { brand: { id: "brand" } } }), getBrandContextFailure: () => ({ error: "no", status: 403 }) },
       "@/lib/commerce/connection-service": { getActiveCommerceConnection: async () => null, isConnectionUsable: () => true }, "@/lib/commerce/providers/commerce7": { getCommerce7AppConfig: () => ({}) },
       "@/lib/commerce/providers/commerce7-rewards-client": { claimTagTitle: () => "SQRATCH-per-claim" }, "@/lib/commerce7-reward-http": { rewardErrorResponse: (error: Error) => NextResponse.json({ error: error.message }, { status: 500 }) } };

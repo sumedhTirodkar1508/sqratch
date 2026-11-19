@@ -1,3 +1,4 @@
+import { buildReportMeta, ORDER_PAYMENT_STATUSES, requestedFilterNames } from "@/lib/report-meta";
 import { countFallbackOrders, effectiveOrderDate, orderDateWhere, parseOrderDateBasis } from "@/lib/commerce/order-date-basis";
 import { NextRequest, NextResponse } from "next/server";
 import { getCreatorContext, getOwnedExperienceForCreator } from "@/lib/creator-auth";
@@ -215,12 +216,26 @@ export async function creatorConversionsGetImpl(
     attributedOrdersByProduct: attachConversionNames(conversion.attributedOrdersByProduct, productNames),
   };
 
+  const fallbackOrderCount = countFallbackOrders(rows, dateBasis);
+
   return NextResponse.json({
     data: {
       range: { start: range.range.start.toISOString(), end: range.range.end.toISOString() },
       filters: { experienceId: requestedExperienceId },
       dateBasis,
-      fallbackOrderCount: countFallbackOrders(rows, dateBasis),
+      fallbackOrderCount,
+      meta: buildReportMeta({
+        period: range.range,
+        dateBasis,
+        scope: requestedExperienceId ? "experience" : "creator",
+        appliedFilters: requestedExperienceId ? { experienceId: requestedExperienceId } : {},
+        unsupportedFilters: requestedFilterNames(request.nextUrl.searchParams, ["campaignId"]),
+        includedStatuses: ORDER_PAYMENT_STATUSES,
+        coverage: {
+          currencies: conversion.attributedOrderValueByCurrency.map((row) => row.currencyCode),
+          fallbackOrderCount,
+        },
+      }),
       ...data,
       dailyTrend,
     },

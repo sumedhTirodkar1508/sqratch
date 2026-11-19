@@ -269,3 +269,13 @@ Physical sticker (qrCodeData)
 - `prisma/schema.prisma` — especially model constraints and enums
 - `src/middleware.ts` — route protection
 - Any file touching `points`, `rewards`, `shopify`, `qr`, `unlock`, `reconcil`
+
+## QR state, staged assets and completion times (round 3)
+
+- **Archive, stop, delete are three different things.** Archiving (`QRCodeBatch.archivedAt`) only hides a batch from lists. Stopping redemptions (`QRCode.redemptionStoppedAt`, batch `redemptionStoppedAt`) blocks NEW redemptions only; the scan route locks the code row before reading it, `redeemQrCodeForUser` adds the predicate, and the sign-in transfer passes `honorExistingAnonymousUnlock: true` so an unlock earned before the stop is never destroyed. Deleting stays limited to genuinely unused codes. `Brand.isActive` and `Campaign.isActive` are not enforced (D-04).
+- **Lesson videos are owned through `StagedAsset`** (`src/lib/staged-assets.ts`, `src/lib/lesson-video-lifecycle.ts`). Never delete a lesson-video object directly: claim its row in the same transaction as the lesson change, then delete after commit (`settleClaimedAssets`); the sweeper retries.
+- **`LessonProgress.completedAt` is set once**, only by the write that flips `isCompleted` to true, through `raiseLessonProgress`. Do not update it elsewhere and do not backfill it.
+- **Unique violations under the driver adapter** have no `meta.target`: use `isUniqueViolationOn`.
+- **Q&A limit** is a UTC day, enforced by `submitQuestionWithinLimit` (serializable transaction, three attempts).
+- **Filters in the URL** go through `useUrlFilters` and must never carry emails, tokens, customer identifiers or QR codes. Destructive actions use `ConfirmDestructive`; forms register dirty state with `useUnsavedChanges`.
+- **Rate limiting:** `sharedRateLimit` / `loginThrottle` are opt-in shared (`RATE_LIMIT_STORE=postgres`) and fail open to memory.

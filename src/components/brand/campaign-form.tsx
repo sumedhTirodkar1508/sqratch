@@ -11,6 +11,7 @@ import { PageCard } from "@/components/experience/experience-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { snapshotOf, useUnsavedChanges } from "@/hooks/use-unsaved-changes";
 
 type CampaignForm = {
   name: string;
@@ -18,6 +19,8 @@ type CampaignForm = {
   description: string;
   isActive: boolean;
 };
+
+const EMPTY_FORM: CampaignForm = { name: "", slug: "", description: "", isActive: true };
 
 function slugifyValue(value: string) {
   return value
@@ -37,12 +40,9 @@ export function BrandCampaignForm({
 }) {
   const brandFetch = useBrandFetch();
   const router = useRouter();
-  const [form, setForm] = useState<CampaignForm>({
-    name: "",
-    slug: "",
-    description: "",
-    isActive: true,
-  });
+  const [form, setForm] = useState<CampaignForm>(EMPTY_FORM);
+  // Last loaded or saved values; the form is dirty when it differs from them.
+  const [baseline, setBaseline] = useState(() => snapshotOf(EMPTY_FORM));
   const [slugTouched, setSlugTouched] = useState(false);
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
@@ -66,12 +66,14 @@ export function BrandCampaignForm({
           isActive: boolean;
         }>(`/api/brand/campaigns/${campaignId}`);
 
-        setForm({
+        const loaded = {
           name: data.name,
           slug: data.slug,
           description: data.description || "",
           isActive: data.isActive,
-        });
+        };
+        setForm(loaded);
+        setBaseline(snapshotOf(loaded));
         setSlugTouched(data.slug !== slugifyValue(data.name));
       } catch (loadError) {
         setError(getErrorMessage(loadError, "Failed to load campaign."));
@@ -82,6 +84,8 @@ export function BrandCampaignForm({
 
     void load();
   }, [campaignId, mode]);
+
+  useUnsavedChanges(!loading && snapshotOf(form) !== baseline);
 
   const submitLabel = useMemo(
     () =>
@@ -115,6 +119,7 @@ export function BrandCampaignForm({
         body: JSON.stringify(form),
       });
 
+      setBaseline(snapshotOf(form));
       router.push(
         mode === "create"
           ? "/dashboard/brand/campaigns"

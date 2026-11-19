@@ -276,6 +276,19 @@ writers already explicitly set `provider = SHOPIFY`.
 
 **Verified locally only:** applied to a disposable database built with `db push` from the previous schema, after which `migrate diff` was empty. Not applied to any connected or production database.
 
+## Migrations on branch `claude/remaining-correctness-ux-analytics` (pending)
+
+Four additive migrations, no backfill, verified only on disposable PostgreSQL databases (built with `db push` from the previous schema, then `migrate diff` empty). Apply with the standard procedure below (back up, preflight, `migrate deploy` once from a controlled job, then deploy the application). Never applied to any connected database.
+
+| Migration | Change | Preflight (read-only) | Rollback |
+|---|---|---|---|
+| `20261117120000_add_qr_redemption_stop` | `QRCode.redemptionStoppedAt`, `QRCodeBatch.redemptionStoppedAt` / `redemptionStoppedById` (FK to `User`, `ON DELETE SET NULL`) | the three columns do not exist; `SELECT count(*) FILTER (WHERE NOT "isActive") FROM "QRCode"` (and `QRCodeBatch`, `Campaign`) for information | Revert the application. Codes stopped while live become redeemable again if the stop predicate is removed: resume them first or keep the predicate. |
+| `20261117130000_add_staged_asset` | enum `StagedAssetStatus`, table `StagedAsset` (unique `bucket, path`) | `to_regclass('public."StagedAsset"')` is NULL; no two lessons share a storage path (query in `docs/lesson-video-uploads.md`) | Revert the application; the table may stay. Do not schedule the sweeper until reviewed. |
+| `20261117140000_add_lesson_progress_completed_at` | nullable `LessonProgress.completedAt` | column does not exist | Revert the application; the column may stay. Existing completions keep NULL and report as "date not recorded". |
+| `20261117150000_add_rate_limit_counter` | table `RateLimitCounter` | table does not exist | Unset `RATE_LIMIT_STORE`; the table may stay. Only read when `RATE_LIMIT_STORE=postgres`, so it may be applied before or after the release. |
+
+The first three are required by the new application code (it reads and writes those columns and table): apply them before deploying. Old application versions ignore all four.
+
 ## Known schema discrepancies (read-only investigation, 2026-11)
 
 Neither item has been corrected. Production was only read, never changed.

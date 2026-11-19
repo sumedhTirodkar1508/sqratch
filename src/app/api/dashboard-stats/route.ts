@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     dateFilter = { gte: firstDay };
   }
 
-  const [totalRedemptions, qrTotals, qrRedeemed] = await Promise.all([
+  const [totalRedemptions, qrTotals, qrRedeemed, qrStopped] = await Promise.all([
     prisma.qRCode.count({
       where: {
         usedAt: dateFilter ? dateFilter : { not: null },
@@ -40,6 +40,18 @@ export async function GET(request: Request) {
       by: ["campaignId"],
       where: {
         status: "USED",
+        ...(dateFilter ? { createdAt: dateFilter } : {}),
+      },
+      _count: {
+        campaignId: true,
+      },
+    }),
+    // NEW codes whose redemptions were stopped: still in the totals, but not available to redeem.
+    prisma.qRCode.groupBy({
+      by: ["campaignId"],
+      where: {
+        status: "NEW",
+        redemptionStoppedAt: { not: null },
         ...(dateFilter ? { createdAt: dateFilter } : {}),
       },
       _count: {
@@ -71,6 +83,10 @@ export async function GET(request: Request) {
     qrRedeemed.map((item) => [item.campaignId, item._count.campaignId || 0]),
   );
 
+  const stoppedMap = new Map(
+    qrStopped.map((item) => [item.campaignId, item._count.campaignId || 0]),
+  );
+
   const campaignStats = qrTotals
     .map((item) => ({
       campaignId: item.campaignId,
@@ -78,6 +94,7 @@ export async function GET(request: Request) {
         campaignNameMap.get(item.campaignId) || "Unknown campaign",
       totalQRCodes: item._count.campaignId || 0,
       redeemedCount: redeemedMap.get(item.campaignId) || 0,
+      stoppedCount: stoppedMap.get(item.campaignId) || 0,
     }))
     .sort((a, b) => b.totalQRCodes - a.totalQRCodes);
 

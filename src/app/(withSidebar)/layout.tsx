@@ -14,6 +14,7 @@ import { SqratchLogo } from "@/components/brand/sqratch-logo";
 import { hasPendingApproval } from "@/lib/approval-gating";
 import { ThemeSelect } from "@/components/theme-select";
 import { TransferPendingNotice } from "@/components/auth/transfer-pending-notice";
+import { UnsavedNavigationGuard } from "@/components/unsaved-navigation-guard";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -37,6 +38,7 @@ export default async function DashboardLayout({
   return (
     <SidebarProvider>
       <div className="flex min-h-screen w-full">
+        <UnsavedNavigationGuard />
         <AppSidebar />
         {/* SidebarInset to contain breadcrumbs and main content */}
         <SidebarInset className="flex min-w-0 flex-col w-auto">

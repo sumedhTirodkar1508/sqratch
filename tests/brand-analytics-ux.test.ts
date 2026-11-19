@@ -26,6 +26,14 @@ function pageHarness() {
       if (!(i in states)) states[i] = typeof initial === "function" ? initial() : initial;
       return [states[i], (value: unknown) => { states[i] = typeof value === "function" ? value(states[i]) : value; }];
     },
+    useMemo(fn: () => unknown, deps: unknown[]) {
+      const i = stateIndex++;
+      const previous = states[i] as { deps: unknown[]; value: unknown } | undefined;
+      if (previous && deps.every((dep, j) => Object.is(dep, previous.deps[j]))) return previous.value;
+      const value = fn();
+      states[i] = { deps, value };
+      return value;
+    },
     useRef(initial: unknown) {
       const i = stateIndex++;
       if (!(i in states)) states[i] = { current: initial };
@@ -45,6 +53,7 @@ function pageHarness() {
     exports, URLSearchParams, Date,
     require(name: string) {
       if (name === "react") return react;
+      if (name === "@/hooks/use-url-filters") return { useUrlFilters: (defaults: Record<string, string>) => { const [values, set] = react.useState(defaults) as [Record<string, string>, (next: Record<string, string>) => void]; return [values, (patch: Record<string, string>) => set({ ...values, ...patch })]; } };
       if (name === "react/jsx-runtime") return { jsx, jsxs: jsx, Fragment: "fragment" };
       if (name === "@/components/experience/client-utils") return {
         fetchJson: (url: string) => new Promise((resolve, reject) => requests.push({ url, resolve, reject })),
